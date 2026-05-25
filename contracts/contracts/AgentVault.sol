@@ -138,6 +138,13 @@ contract AgentVault {
 
     // ── Agent reputation management (proxied through vault since vault owns the agent) ──
 
+    function endorseOtherAgent(uint256 targetAgentId, uint8 score, string calldata reason)
+        external
+        onlyVaultOwner
+    {
+        identity.endorseAgent(agentId, targetAgentId, score, reason);
+    }
+
     function updateAgentReputation(int256 delta, string calldata reason)
         external
         onlyVaultOwner

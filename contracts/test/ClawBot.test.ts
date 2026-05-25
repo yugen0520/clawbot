@@ -209,4 +209,121 @@ describe("ClawBot Contracts", function () {
       ).to.be.revertedWith("Not vault owner");
     });
   });
+
+  describe("Endorsements (Multi-Agent)", function () {
+    let vaultB: AgentVault;
+
+    beforeEach(async function () {
+      const Vault = await ethers.getContractFactory("AgentVault");
+      vaultB = await Vault.deploy(
+        await identity.getAddress(),
+        "Agent Beta", "deepseek-chat",
+        ethers.encodeBytes32String("beta_telegram")
+      );
+      await vaultB.waitForDeployment();
+      // vault = agentId 0 (ClawBot v1)
+      // vaultB = agentId 1 (Agent Beta)
+    });
+
+    it("should allow vault A to endorse vault B's agent", async function () {
+      await vault.endorseOtherAgent(1, 5, "Excellent agent");
+      const stats = await identity.getEndorsementStats(1);
+      expect(stats.count).to.equal(1);
+      expect(stats.aggregateScore).to.equal(5);
+
+      const agentB = await identity.getAgent(1);
+      expect(agentB.reputationScore).to.equal(5100); // 5000 + 100
+    });
+
+    it("should deduct reputation for score 1", async function () {
+      await vault.endorseOtherAgent(1, 1, "Failed to deliver");
+      const agentB = await identity.getAgent(1);
+      expect(agentB.reputationScore).to.equal(4900); // 5000 - 100
+    });
+
+    it("should add 50 for score 4", async function () {
+      await vault.endorseOtherAgent(1, 4, "Good work");
+      const agentB = await identity.getAgent(1);
+      expect(agentB.reputationScore).to.equal(5050); // 5000 + 50
+    });
+
+    it("should add 10 for score 3", async function () {
+      await vault.endorseOtherAgent(1, 3, "OK");
+      const agentB = await identity.getAgent(1);
+      expect(agentB.reputationScore).to.equal(5010); // 5000 + 10
+    });
+
+    it("should deduct 30 for score 2", async function () {
+      await vault.endorseOtherAgent(1, 2, "Below average");
+      const agentB = await identity.getAgent(1);
+      expect(agentB.reputationScore).to.equal(4970); // 5000 - 30
+    });
+
+    it("should prevent self-endorsement", async function () {
+      await expect(
+        vault.endorseOtherAgent(0, 5, "Self praise")
+      ).to.be.revertedWith("Cannot endorse self");
+    });
+
+    it("should prevent duplicate endorsement", async function () {
+      await vault.endorseOtherAgent(1, 5, "First");
+      await expect(
+        vault.endorseOtherAgent(1, 4, "Second")
+      ).to.be.revertedWith("Already endorsed");
+    });
+
+    it("should prevent endorsement from inactive agent", async function () {
+      await vault.setAgentActive(false);
+      await expect(
+        vault.endorseOtherAgent(1, 5, "Inactive rater")
+      ).to.be.revertedWith("Rater inactive");
+    });
+
+    it("should prevent endorsement from low-reputation agent", async function () {
+      // Reduce vault agent rep below threshold (1000)
+      await vault.updateAgentReputation(-4500, "Bad performance");
+      await expect(
+        vault.endorseOtherAgent(1, 5, "Low rep rater")
+      ).to.be.revertedWith("Rater reputation too low");
+    });
+
+    it("should return correct endorsement data", async function () {
+      await vault.endorseOtherAgent(1, 4, "Solid agent");
+      const e = await identity.getEndorsement(1, 0);
+      expect(e.raterAgentId).to.equal(0);
+      expect(e.targetAgentId).to.equal(1);
+      expect(e.score).to.equal(4);
+      expect(e.reason).to.equal("Solid agent");
+    });
+
+    it("should get endorsement stats correctly", async function () {
+      await vault.endorseOtherAgent(1, 5, "A");
+      const vaultC = await (await ethers.getContractFactory("AgentVault")).deploy(
+        await identity.getAddress(),
+        "Agent Gamma", "deepseek-chat",
+        ethers.encodeBytes32String("gamma_telegram")
+      );
+      await vaultC.waitForDeployment();
+      await vaultC.endorseOtherAgent(1, 3, "B");
+
+      const stats = await identity.getEndorsementStats(1);
+      expect(stats.count).to.equal(2);
+      expect(stats.aggregateScore).to.equal(8); // 5 + 3
+    });
+
+    it("should log endorsement in reputation history", async function () {
+      await vault.endorseOtherAgent(1, 5, "Great");
+      const histLen = await identity.getReputationHistoryLength(1);
+      expect(histLen).to.equal(1);
+      const change = await identity.getReputationChange(1, 0);
+      expect(change.delta).to.equal(100);
+      expect(change.reason).to.equal("Great");
+    });
+
+    it("should reject non-owner from endorseOtherAgent", async function () {
+      await expect(
+        vault.connect(user).endorseOtherAgent(1, 5, "Hack")
+      ).to.be.revertedWith("Not vault owner");
+    });
+  });
 });

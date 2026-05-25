@@ -34,11 +34,22 @@ contract AgentIdentity {
         uint256 timestamp;
     }
 
+    struct Endorsement {
+        uint256 raterAgentId;
+        uint256 targetAgentId;
+        uint8 score; // 1-5
+        string reason;
+        uint256 timestamp;
+    }
+
     mapping(uint256 => Agent) public agents;
     mapping(uint256 => Action[]) public agentActions;
     mapping(uint256 => ReputationChange[]) public reputationHistory;
     mapping(uint256 => address) public agentOwner;
     mapping(address => uint256[]) public ownerAgents;
+    mapping(uint256 => mapping(uint256 => Endorsement)) public endorsements;
+    mapping(uint256 => uint256) public endorsementCount;
+    mapping(uint256 => uint256) public aggregateEndorsementScore;
 
     uint256 public minReputationForAction = 1000; // 10% minimum reputation
 
@@ -48,6 +59,7 @@ contract AgentIdentity {
     event AgentStatusChanged(uint256 indexed agentId, bool active);
     event TelegramLinked(uint256 indexed agentId, bytes32 telegramIdHash);
     event MinReputationUpdated(uint256 oldThreshold, uint256 newThreshold);
+    event AgentEndorsed(uint256 indexed raterAgentId, uint256 indexed targetAgentId, uint8 score, string reason);
 
     modifier onlyAgentOwner(uint256 agentId) {
         require(agentOwner[agentId] == msg.sender, "Not agent owner");
@@ -154,6 +166,56 @@ contract AgentIdentity {
         emit AgentAction(agentId, actionType, amount, description);
     }
 
+    function endorseAgent(
+        uint256 raterAgentId,
+        uint256 targetAgentId,
+        uint8 score,
+        string calldata reason
+    ) external onlyAgentOwner(raterAgentId) {
+        require(raterAgentId != targetAgentId, "Cannot endorse self");
+        require(score >= 1 && score <= 5, "Score must be 1-5");
+        require(endorsements[targetAgentId][raterAgentId].timestamp == 0, "Already endorsed");
+        require(agents[raterAgentId].isActive, "Rater inactive");
+        require(agents[raterAgentId].reputationScore >= minReputationForAction, "Rater reputation too low");
+
+        endorsements[targetAgentId][raterAgentId] = Endorsement({
+            raterAgentId: raterAgentId,
+            targetAgentId: targetAgentId,
+            score: score,
+            reason: reason,
+            timestamp: block.timestamp
+        });
+        endorsementCount[targetAgentId]++;
+        aggregateEndorsementScore[targetAgentId] += score;
+
+        int256 delta;
+        if (score == 5) delta = 100;
+        else if (score == 4) delta = 50;
+        else if (score == 3) delta = 10;
+        else if (score == 2) delta = -30;
+        else delta = -100;
+
+        Agent storage target = agents[targetAgentId];
+        uint256 current = target.reputationScore;
+        if (delta > 0) {
+            uint256 increase = uint256(delta);
+            target.reputationScore = current + increase > 10000 ? 10000 : current + increase;
+        } else {
+            uint256 decrease = uint256(-delta);
+            target.reputationScore = decrease >= current ? 0 : current - decrease;
+        }
+
+        reputationHistory[targetAgentId].push(ReputationChange({
+            delta: delta,
+            newScore: target.reputationScore,
+            reason: reason,
+            timestamp: block.timestamp
+        }));
+
+        emit AgentEndorsed(raterAgentId, targetAgentId, score, reason);
+        emit ReputationUpdated(targetAgentId, delta, target.reputationScore, reason);
+    }
+
     // ── View functions ──
 
     function getAgent(uint256 agentId) external view returns (Agent memory) {
@@ -178,5 +240,21 @@ contract AgentIdentity {
 
     function getReputationChange(uint256 agentId, uint256 index) external view returns (ReputationChange memory) {
         return reputationHistory[agentId][index];
+    }
+
+    function getAgentCount() external view returns (uint256) {
+        return _nextTokenId;
+    }
+
+    function getEndorsement(uint256 targetAgentId, uint256 raterAgentId)
+        external view returns (Endorsement memory)
+    {
+        return endorsements[targetAgentId][raterAgentId];
+    }
+
+    function getEndorsementStats(uint256 agentId)
+        external view returns (uint256 count, uint256 aggregateScore)
+    {
+        return (endorsementCount[agentId], aggregateEndorsementScore[agentId]);
     }
 }

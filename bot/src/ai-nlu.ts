@@ -44,12 +44,14 @@ export async function translateText(english: string, targetLang: string): Promis
 }
 
 export interface ParsedIntent {
-  action: "deposit" | "withdraw" | "compare" | "invest" | "status" | "check_balance" | "help" | "unknown";
+  action: "deposit" | "withdraw" | "compare" | "invest" | "status" | "check_balance" | "rate_agent" | "lookup_agent" | "help" | "unknown";
   amount?: number;
   token?: string;
   strategy?: string;
   riskLevel?: "low" | "medium" | "high";
   targetAddress?: string;
+  targetAgentId?: number;
+  ratingScore?: number;
   rawQuery: string;
 }
 
@@ -96,23 +98,27 @@ const COMBINED_SYSTEM = `You are ClawBot, an AI DeFi assistant on Mantle Network
 You MUST output exactly two sections separated by "---RESPONSE---":
 
 ---INTENT---
-{"action":"<action>","amount":<number>,"token":"<string>","strategy":"<string>","riskLevel":"<level>","targetAddress":"<address>"}
+{"action":"<action>","amount":<number>,"token":"<string>","strategy":"<string>","riskLevel":"<level>","targetAddress":"<address>","targetAgentId":<number>,"ratingScore":<number>}
 ---RESPONSE---
 <your natural language reply here>
 
 Intent field rules:
-- action: "deposit" | "withdraw" | "compare" | "invest" | "status" | "check_balance" | "help" | "unknown"
+- action: "deposit" | "withdraw" | "compare" | "invest" | "status" | "check_balance" | "rate_agent" | "lookup_agent" | "help" | "unknown"
 - amount: number (extract the number, 0 if none. "20 MNT" → amount:20, token:"MNT")
 - token: string (MNT / USDC etc., empty if none)
 - strategy: string ("highest yield" / "stable" / "lending" etc., empty if none)
 - riskLevel: "low" | "medium" | "high" (default "medium" for invest/compare)
 - targetAddress: string (0x-prefixed address copied verbatim from user message, empty if none)
+- targetAgentId: number (agent ID number if user mentions rating or looking up a specific agent, 0 if none)
+- ratingScore: number (1-5 score if rating an agent, 0 if none)
 
 Action mapping:
 - Checking balance, wallet query → "check_balance"
 - Comparing yields, asking about pools, "which is best" → "compare"
 - Depositing, investing, buying, "spend X on" → "invest"
 - Checking portfolio, my assets, my status → "status"
+- Rating/endorsing an agent, giving stars: "rate agent 1 five stars" → "rate_agent" with targetAgentId:1, ratingScore:5
+- Looking up agents, asking about reputation, "show me all agents", agent directory → "lookup_agent" with optional targetAgentId
 - Help, greeting, unclear → "help"
 
 Response rules:

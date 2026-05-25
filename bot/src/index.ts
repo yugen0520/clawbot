@@ -25,8 +25,11 @@ import {
   deposit,
   executeStrategy,
   getTotalDeposits,
+  endorseOtherAgent,
+  getAllAgents,
   provider,
   signer,
+  identityContract,
 } from "./contract";
 import { ethers } from "ethers";
 
@@ -81,6 +84,7 @@ bot.command("start", async (ctx) => {
     .text("Portfolio / 我的资产", "portfolio")
     .text("Agent Info / Agent 信息", "agent")
     .row()
+    .text("Agent Directory / Agent 目录", "agents_list")
     .text("Check Balance / 查余额", "check_balance_prompt");
 
   await ctx.reply(
@@ -200,6 +204,32 @@ bot.callbackQuery("check_balance_prompt", async (ctx) => {
   addToHistory(ctx.chat?.id || 0, "user", "[Check Balance]");
 });
 
+bot.callbackQuery("agents_list", async (ctx) => {
+  await ctx.answerCallbackQuery();
+  const lang = getUserLang(ctx.chat?.id || 0);
+  try {
+    const agents = await getAllAgents();
+    if (agents.length === 0) {
+      await replyBilingual(ctx, "No agents registered yet.");
+      return;
+    }
+    const lines = [`*All Registered Agents (${agents.length}):*\n`];
+    for (const a of agents) {
+      const repEmoji = a.reputationScore >= 7000 ? "🟢" : a.reputationScore >= 3000 ? "🟡" : "🔴";
+      lines.push(
+        `*ID ${a.id}:* ${a.name} ${a.isActive ? "" : "(Inactive)"}`,
+        `  Model: ${a.modelProvider} | Rep: ${repEmoji} ${(a.reputationScore / 100).toFixed(0)}%`,
+        `  Actions: ${a.actionCount} | Endorsements: ${a.endorsementCount} (avg ${a.avgEndorsement}/5)`,
+        ""
+      );
+    }
+    const text = await bilingual(lines.join("\n"), lang);
+    await ctx.reply(text, { parse_mode: "Markdown" });
+  } catch {
+    await replyBilingual(ctx, "Could not fetch agent directory.");
+  }
+});
+
 // Execute strategy callback
 bot.callbackQuery(/^execute_/, async (ctx) => {
   await ctx.answerCallbackQuery();
@@ -264,6 +294,64 @@ bot.callbackQuery(/^execute_/, async (ctx) => {
     }
   } catch (e: any) {
     await replyBilingual(ctx, `Execution failed: ${e.message || "unknown error"}`);
+  }
+});
+
+// ── Multi-agent commands ──
+
+bot.command("agents", async (ctx) => {
+  const lang = getUserLang(ctx.chat?.id || 0);
+  try {
+    const agents = await getAllAgents();
+    if (agents.length === 0) {
+      await replyBilingual(ctx, "No agents registered yet.");
+      return;
+    }
+    const lines = [`*All Registered Agents (${agents.length}):*\n`];
+    for (const a of agents) {
+      const repEmoji = a.reputationScore >= 7000 ? "🟢" : a.reputationScore >= 3000 ? "🟡" : "🔴";
+      lines.push(
+        `*ID ${a.id}:* ${a.name} ${a.isActive ? "" : "(Inactive)"}`,
+        `  Model: ${a.modelProvider} | Rep: ${repEmoji} ${(a.reputationScore / 100).toFixed(0)}%`,
+        `  Actions: ${a.actionCount} | Endorsements: ${a.endorsementCount} (avg ${a.avgEndorsement}/5)`,
+        ""
+      );
+    }
+    const text = await bilingual(lines.join("\n"), lang);
+    await ctx.reply(text, { parse_mode: "Markdown" });
+  } catch {
+    await replyBilingual(ctx, "Could not fetch agent directory.");
+  }
+});
+
+bot.command("rate", async (ctx) => {
+  const lang = getUserLang(ctx.chat?.id || 0);
+  const args = ctx.message?.text?.split(" ").slice(1) || [];
+  if (args.length < 2) {
+    await replyBilingual(ctx,
+      "Usage: `/rate <agentId> <score 1-5> <reason>`\nExample: `/rate 1 5 Excellent yield optimization`",
+      { parse_mode: "Markdown" }
+    );
+    return;
+  }
+  const targetAgentId = parseInt(args[0], 10);
+  const score = parseInt(args[1], 10);
+  const reason = args.slice(2).join(" ") || "Endorsed via ClawBot";
+
+  if (isNaN(targetAgentId) || isNaN(score) || score < 1 || score > 5) {
+    await replyBilingual(ctx, "Invalid arguments. Usage: `/rate <agentId> <1-5> <reason>`");
+    return;
+  }
+
+  try {
+    const tx = await endorseOtherAgent(targetAgentId, score, reason);
+    const text = await bilingual(
+      `*Endorsed Agent #${targetAgentId}*\nScore: ${score}/5\nTx: \`${tx.hash}\``,
+      lang
+    );
+    await ctx.reply(text, { parse_mode: "Markdown" });
+  } catch (e: any) {
+    await replyBilingual(ctx, `Endorsement failed: ${e.message || "unknown"}`);
   }
 });
 
@@ -426,6 +514,61 @@ bot.on("message:text", async (ctx) => {
         await ctx.reply(`${response}\n\n${dataText}`, { parse_mode: "Markdown" });
       } catch {
         await replyBilingual(ctx, "Contract not connected. Send /start to see available features.");
+      }
+      break;
+    }
+
+    case "rate_agent": {
+      const targetId = intent.targetAgentId;
+      const score = intent.ratingScore;
+      if (!targetId || !score) {
+        await ctx.reply(response, { parse_mode: "Markdown" });
+        return;
+      }
+      try {
+        const tx = await endorseOtherAgent(targetId, score, intent.rawQuery);
+        const dataText = await bilingual(
+          `*Endorsed Agent #${targetId}*\nScore: ${score}/5\nTx: \`${tx.hash}\``,
+          userLang
+        );
+        await ctx.reply(`${response}\n\n${dataText}`, { parse_mode: "Markdown" });
+      } catch (e: any) {
+        await replyBilingual(ctx, `Endorsement failed: ${e.message || "unknown"}`);
+      }
+      break;
+    }
+
+    case "lookup_agent": {
+      try {
+        if (intent.targetAgentId && intent.targetAgentId > 0) {
+          const agent = await getAgentInfo(intent.targetAgentId);
+          const stats = await identityContract.getEndorsementStats(intent.targetAgentId);
+          const repScore = Number(agent.reputationScore);
+          const repEmoji = repScore >= 7000 ? "🟢" : repScore >= 3000 ? "🟡" : "🔴";
+          const lines = [
+            `*Agent #${intent.targetAgentId}:* ${agent.name}`,
+            `Model: ${agent.modelProvider}`,
+            `Status: ${agent.isActive ? "Active" : "Inactive"}`,
+            `Reputation: ${repEmoji} ${(repScore / 100).toFixed(0)}%`,
+            `Actions: ${agent.actionCount.toString()}`,
+            `Endorsements: ${stats.count.toString()} (avg ${stats.count > 0 ? (Number(stats.aggregateScore) / Number(stats.count)).toFixed(1) : "N/A"}/5)`,
+          ];
+          const dataText = await bilingual(lines.join("\n"), userLang);
+          await ctx.reply(`${response}\n\n${dataText}`, { parse_mode: "Markdown" });
+        } else {
+          const agents = await getAllAgents();
+          const lines = [`*All Agents (${agents.length}):*\n`];
+          for (const a of agents) {
+            const repEmoji = a.reputationScore >= 7000 ? "🟢" : a.reputationScore >= 3000 ? "🟡" : "🔴";
+            lines.push(
+              `*ID ${a.id}:* ${a.name} ${repEmoji} ${(a.reputationScore / 100).toFixed(0)}% | ${a.endorsementCount} endorsements`
+            );
+          }
+          const dataText = await bilingual(lines.join("\n"), userLang);
+          await ctx.reply(`${response}\n\n${dataText}`, { parse_mode: "Markdown" });
+        }
+      } catch {
+        await replyBilingual(ctx, "Agent lookup failed.");
       }
       break;
     }

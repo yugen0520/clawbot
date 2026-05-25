@@ -8,6 +8,7 @@ const AGENT_VAULT_ABI = [
   "function updateAgentReputation(int256 delta, string calldata reason) external",
   "function setAgentActive(bool active) external",
   "function updateMinReputation(uint256 threshold) external",
+  "function endorseOtherAgent(uint256 targetAgentId, uint8 score, string calldata reason) external",
   "function getUserPosition(address user) external view returns (tuple(uint256 deposited, uint256 shares, uint256 lastUpdate))",
   "function getAllStrategies() external view returns (tuple(bytes32 id, string name, address protocolAddress, uint256 currentAPY, uint256 totalAllocated, bool active)[])",
   "function totalDeposits() external view returns (uint256)",
@@ -31,6 +32,10 @@ const AGENT_IDENTITY_ABI = [
   "function getReputationChange(uint256 agentId, uint256 index) external view returns (tuple(int256 delta, uint256 newScore, string reason, uint256 timestamp))",
   "function minReputationForAction() external view returns (uint256)",
   "function agentOwner(uint256 agentId) external view returns (address)",
+  "function endorseAgent(uint256 raterAgentId, uint256 targetAgentId, uint8 score, string calldata reason) external",
+  "function getAgentCount() external view returns (uint256)",
+  "function getEndorsement(uint256 targetAgentId, uint256 raterAgentId) external view returns (tuple(uint256 raterAgentId, uint256 targetAgentId, uint8 score, string reason, uint256 timestamp))",
+  "function getEndorsementStats(uint256 agentId) external view returns (uint256 count, uint256 aggregateScore)",
 ];
 
 let provider: ethers.JsonRpcProvider;
@@ -128,6 +133,61 @@ export async function getReputationHistory(agentId: number) {
     history.push(await identityContract.getReputationChange(agentId, i));
   }
   return history;
+}
+
+export interface AgentDirectoryEntry {
+  id: number;
+  name: string;
+  modelProvider: string;
+  reputationScore: number;
+  isActive: boolean;
+  actionCount: number;
+  endorsementCount: number;
+  avgEndorsement: string;
+}
+
+export async function getAgentCount(): Promise<number> {
+  const count = await identityContract.getAgentCount();
+  return Number(count);
+}
+
+export async function getAllAgents(): Promise<AgentDirectoryEntry[]> {
+  const count = await getAgentCount();
+  const agents: AgentDirectoryEntry[] = [];
+  for (let i = 0; i < count; i++) {
+    try {
+      const a = await identityContract.getAgent(i);
+      const stats = await identityContract.getEndorsementStats(i);
+      agents.push({
+        id: Number(a.id),
+        name: a.name,
+        modelProvider: a.modelProvider,
+        reputationScore: Number(a.reputationScore),
+        isActive: a.isActive,
+        actionCount: Number(a.actionCount),
+        endorsementCount: Number(stats.count),
+        avgEndorsement: stats.count > 0
+          ? (Number(stats.aggregateScore) / Number(stats.count)).toFixed(1)
+          : "N/A",
+      });
+    } catch {
+      // skip uninitialized agents
+    }
+  }
+  return agents;
+}
+
+export async function endorseOtherAgent(
+  targetAgentId: number,
+  score: number,
+  reason: string
+) {
+  const tx = await vaultContract.endorseOtherAgent(targetAgentId, score, reason);
+  return tx.wait();
+}
+
+export async function getEndorsement(targetAgentId: number, raterAgentId: number) {
+  return identityContract.getEndorsement(targetAgentId, raterAgentId);
 }
 
 export { provider, signer, vaultContract, identityContract };
