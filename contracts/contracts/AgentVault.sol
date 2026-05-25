@@ -1,0 +1,152 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+import "./AgentIdentity.sol";
+
+/// @title AgentVault — AI-managed yield vault on Mantle
+/// @notice Users deposit MNT, AI agent decides yield strategy, profits auto-compound
+contract AgentVault {
+    AgentIdentity public immutable identity;
+    uint256 public immutable agentId;
+    address public vaultOwner;
+
+    struct UserPosition {
+        uint256 deposited;
+        uint256 shares;
+        uint256 lastUpdate;
+    }
+
+    struct Strategy {
+        bytes32 id;
+        string name;
+        address protocolAddress;
+        uint256 currentAPY; // basis points, 850 = 8.50%
+        uint256 totalAllocated;
+        bool active;
+    }
+
+    mapping(address => UserPosition) public positions;
+    mapping(bytes32 => Strategy) public strategies;
+    bytes32[] public strategyIds;
+
+    uint256 public totalDeposits;
+    uint256 public totalShares;
+    uint256 public performanceFee = 1000; // 10%
+
+    event Deposited(address indexed user, uint256 amount, uint256 shares);
+    event StrategyExecuted(bytes32 indexed strategyId, uint256 amount, string reason);
+    event Withdrawn(address indexed user, uint256 amount);
+    event StrategyAdded(bytes32 indexed strategyId, string name, address protocol);
+
+    constructor(address _identityContract, string memory _agentName, string memory _model) {
+        identity = AgentIdentity(_identityContract);
+        agentId = identity.createAgent(_agentName, _model);
+        vaultOwner = msg.sender;
+    }
+
+    modifier onlyVaultOwner() {
+        require(msg.sender == vaultOwner, "Not vault owner");
+        _;
+    }
+
+    function deposit() external payable {
+        require(msg.value > 0, "Zero deposit");
+
+        uint256 shares = totalDeposits == 0
+            ? msg.value
+            : (msg.value * totalShares) / totalDeposits;
+
+        UserPosition storage pos = positions[msg.sender];
+        pos.deposited += msg.value;
+        pos.shares += shares;
+        pos.lastUpdate = block.timestamp;
+
+        totalDeposits += msg.value;
+        totalShares += shares;
+
+        emit Deposited(msg.sender, msg.value, shares);
+    }
+
+    function addStrategy(
+        bytes32 strategyId,
+        string calldata name,
+        address protocolAddress,
+        uint256 initialAPY
+    ) external onlyVaultOwner {
+        require(!strategies[strategyId].active, "Strategy exists");
+
+        strategies[strategyId] = Strategy({
+            id: strategyId,
+            name: name,
+            protocolAddress: protocolAddress,
+            currentAPY: initialAPY,
+            totalAllocated: 0,
+            active: true
+        });
+        strategyIds.push(strategyId);
+
+        emit StrategyAdded(strategyId, name, protocolAddress);
+    }
+
+    /// @notice AI agent executes a yield strategy — the core on-chain AI action
+    /// @param strategyId The chosen strategy
+    /// @param amount Amount to allocate
+    /// @param apyBasisPoints Current APY observed by the AI agent
+    /// @param reason AI-generated explanation (IPFS hash or short text)
+    function executeStrategy(
+        bytes32 strategyId,
+        uint256 amount,
+        uint256 apyBasisPoints,
+        string calldata reason
+    ) external onlyVaultOwner {
+        Strategy storage strategy = strategies[strategyId];
+        require(strategy.active, "Strategy not active");
+        require(amount <= totalDeposits, "Insufficient vault balance");
+
+        strategy.currentAPY = apyBasisPoints;
+        strategy.totalAllocated += amount;
+
+        identity.logAction(
+            agentId,
+            keccak256("STRATEGY_EXECUTED"),
+            reason,
+            amount
+        );
+
+        emit StrategyExecuted(strategyId, amount, reason);
+    }
+
+    function withdraw(uint256 shares) external {
+        UserPosition storage pos = positions[msg.sender];
+        require(pos.shares >= shares, "Insufficient shares");
+
+        uint256 amount = (shares * totalDeposits) / totalShares;
+        pos.deposited -= amount;
+        pos.shares -= shares;
+        totalDeposits -= amount;
+        totalShares -= shares;
+
+        payable(msg.sender).transfer(amount);
+        emit Withdrawn(msg.sender, amount);
+    }
+
+    function getUserPosition(address user) external view returns (UserPosition memory) {
+        return positions[user];
+    }
+
+    function getStrategyCount() external view returns (uint256) {
+        return strategyIds.length;
+    }
+
+    function getAllStrategies() external view returns (Strategy[] memory) {
+        Strategy[] memory all = new Strategy[](strategyIds.length);
+        for (uint256 i = 0; i < strategyIds.length; i++) {
+            all[i] = strategies[strategyIds[i]];
+        }
+        return all;
+    }
+
+    receive() external payable {
+        // fallback — treat as deposit
+    }
+}
