@@ -5,22 +5,38 @@ const AGENT_VAULT_ABI = [
   "function withdraw(uint256 shares) external",
   "function executeStrategy(bytes32 strategyId, uint256 amount, uint256 apyBasisPoints, string calldata reason) external",
   "function addStrategy(bytes32 strategyId, string calldata name, address protocolAddress, uint256 initialAPY) external",
+  "function updateAgentReputation(int256 delta, string calldata reason) external",
+  "function setAgentActive(bool active) external",
+  "function updateMinReputation(uint256 threshold) external",
   "function getUserPosition(address user) external view returns (tuple(uint256 deposited, uint256 shares, uint256 lastUpdate))",
   "function getAllStrategies() external view returns (tuple(bytes32 id, string name, address protocolAddress, uint256 currentAPY, uint256 totalAllocated, bool active)[])",
   "function totalDeposits() external view returns (uint256)",
+  "function identity() external view returns (address)",
+  "function agentId() external view returns (uint256)",
 ];
 
 const AGENT_IDENTITY_ABI = [
-  "function getAgent(uint256 agentId) external view returns (tuple(uint256 id, address owner, string name, string modelProvider, uint256 createdAt, uint256 actionCount, uint256 totalValueManaged))",
+  "function createAgent(string name, string modelProvider, bytes32 telegramIdHash) external returns (uint256)",
+  "function linkTelegram(uint256 agentId, bytes32 telegramIdHash) external",
+  "function setAgentStatus(uint256 agentId, bool active) external",
+  "function setMinReputation(uint256 threshold) external",
+  "function updateReputation(uint256 agentId, int256 delta, string calldata reason) external",
+  "function verifyAgent(uint256 agentId) external view returns (bool valid, uint256 score)",
+  "function logAction(uint256 agentId, bytes32 actionType, string calldata description, uint256 amount) external",
+  "function getAgent(uint256 agentId) external view returns (tuple(uint256 id, address owner, string name, string modelProvider, bytes32 telegramIdHash, uint256 createdAt, uint256 actionCount, uint256 totalValueManaged, uint256 reputationScore, bool isActive))",
   "function getAction(uint256 agentId, uint256 index) external view returns (tuple(uint256 agentId, bytes32 actionType, string description, uint256 amount, uint256 timestamp))",
   "function getActionCount(uint256 agentId) external view returns (uint256)",
+  "function getOwnerAgents(address owner) external view returns (uint256[])",
+  "function getReputationHistoryLength(uint256 agentId) external view returns (uint256)",
+  "function getReputationChange(uint256 agentId, uint256 index) external view returns (tuple(int256 delta, uint256 newScore, string reason, uint256 timestamp))",
+  "function minReputationForAction() external view returns (uint256)",
+  "function agentOwner(uint256 agentId) external view returns (address)",
 ];
 
 let provider: ethers.JsonRpcProvider;
 let signer: ethers.Wallet;
 let vaultContract: ethers.Contract;
 let identityContract: ethers.Contract;
-
 export function initContracts(
   rpcUrl: string,
   privateKey: string,
@@ -51,6 +67,11 @@ export async function getAgentActions(agentId: number, count: number = 5) {
   return actions;
 }
 
+export async function verifyAgent(agentId: number): Promise<{ valid: boolean; score: number }> {
+  const [valid, score] = await identityContract.verifyAgent(agentId);
+  return { valid, score: Number(score) };
+}
+
 export async function getAllStrategies() {
   return vaultContract.getAllStrategies();
 }
@@ -61,6 +82,9 @@ export async function executeStrategy(
   apyBps: number,
   reason: string
 ) {
+  const { valid } = await verifyAgent(0);
+  if (!valid) throw new Error("Agent identity verification failed — reputation too low or agent inactive");
+
   const tx = await vaultContract.executeStrategy(
     ethers.encodeBytes32String(strategyId),
     ethers.parseEther(amountEth),
@@ -80,6 +104,30 @@ export async function deposit(amountEth: string) {
 export async function getTotalDeposits() {
   const raw = await vaultContract.totalDeposits();
   return ethers.formatEther(raw);
+}
+
+export async function updateAgentReputation(delta: number, reason: string) {
+  const tx = await vaultContract.updateAgentReputation(delta, reason);
+  return tx.wait();
+}
+
+export async function setAgentActive(active: boolean) {
+  const tx = await vaultContract.setAgentActive(active);
+  return tx.wait();
+}
+
+export async function updateMinReputation(threshold: number) {
+  const tx = await vaultContract.updateMinReputation(threshold);
+  return tx.wait();
+}
+
+export async function getReputationHistory(agentId: number) {
+  const len = Number(await identityContract.getReputationHistoryLength(agentId));
+  const history = [];
+  for (let i = 0; i < len; i++) {
+    history.push(await identityContract.getReputationChange(agentId, i));
+  }
+  return history;
 }
 
 export { provider, signer, vaultContract, identityContract };

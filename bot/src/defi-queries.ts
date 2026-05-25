@@ -6,6 +6,7 @@ export interface ProtocolPool {
   tvl: number;
   riskLabel: "low" | "medium" | "high";
   url: string;
+  strategyId: string; // bytes32-encoded on-chain strategy ID (empty if none)
 }
 
 const MANTLE_DEFI_POOLS: ProtocolPool[] = [
@@ -17,6 +18,7 @@ const MANTLE_DEFI_POOLS: ProtocolPool[] = [
     tvl: 2_400_000,
     riskLabel: "low",
     url: "https://agni.finance",
+    strategyId: "AGNI_USDC",
   },
   {
     name: "Merchant Moe MNT-USDC LP",
@@ -26,6 +28,7 @@ const MANTLE_DEFI_POOLS: ProtocolPool[] = [
     tvl: 5_800_000,
     riskLabel: "medium",
     url: "https://merchantmoe.xyz",
+    strategyId: "MOE_MNT_USDC",
   },
   {
     name: "Lendle MNT Lending",
@@ -35,6 +38,7 @@ const MANTLE_DEFI_POOLS: ProtocolPool[] = [
     tvl: 3_100_000,
     riskLabel: "low",
     url: "https://lendle.xyz",
+    strategyId: "LEND_MNT",
   },
   {
     name: "FusionX MNT-USDT Farm",
@@ -44,6 +48,7 @@ const MANTLE_DEFI_POOLS: ProtocolPool[] = [
     tvl: 1_200_000,
     riskLabel: "high",
     url: "https://fusionx.finance",
+    strategyId: "FUSIONX_FARM",
   },
   {
     name: "Minterest MNT Supply",
@@ -53,6 +58,7 @@ const MANTLE_DEFI_POOLS: ProtocolPool[] = [
     tvl: 8_500_000,
     riskLabel: "low",
     url: "https://minterest.com",
+    strategyId: "MINTEREST_MNT",
   },
 ];
 

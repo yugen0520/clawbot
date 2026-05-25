@@ -8,17 +8,23 @@ async function main() {
   const AgentIdentity = await ethers.getContractFactory("AgentIdentity");
   const identity = await AgentIdentity.deploy();
   await identity.waitForDeployment();
-  console.log("AgentIdentity deployed to:", await identity.getAddress());
+  const identityAddr = await identity.getAddress();
+  console.log("AgentIdentity deployed to:", identityAddr);
 
-  // 2. Deploy AgentVault (creates agent #0)
+  // 2. Deploy AgentVault with telegram ID hash
+  const telegramId = ethers.encodeBytes32String("8764147977");
+  const telegramIdHash = ethers.keccak256(telegramId);
+
   const AgentVault = await ethers.getContractFactory("AgentVault");
   const vault = await AgentVault.deploy(
-    await identity.getAddress(),
+    identityAddr,
     "ClawBot v1",
-    "DeepSeek-v4"
+    "DeepSeek-v4",
+    telegramIdHash
   );
   await vault.waitForDeployment();
-  console.log("AgentVault deployed to:", await vault.getAddress());
+  const vaultAddr = await vault.getAddress();
+  console.log("AgentVault deployed to:", vaultAddr);
 
   // 3. Add initial strategies
   const strategies = [
@@ -34,9 +40,17 @@ async function main() {
   }
 
   console.log("\n--- Deployment Complete ---");
-  console.log("AgentIdentity:", await identity.getAddress());
-  console.log("AgentVault:", await vault.getAddress());
+  console.log("AgentIdentity:", identityAddr);
+  console.log("AgentVault:", vaultAddr);
   console.log("Agent ID:", 0);
+
+  // Verify agent was created properly
+  const agent = await identity.getAgent(0);
+  console.log("\nAgent 0 info:");
+  console.log("  Name:", agent.name);
+  console.log("  Model:", agent.modelProvider);
+  console.log("  Active:", agent.isActive);
+  console.log("  Reputation:", agent.reputationScore.toString());
 }
 
 main().catch((error) => {

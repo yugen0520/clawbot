@@ -3,8 +3,8 @@ pragma solidity ^0.8.20;
 
 import "./AgentIdentity.sol";
 
-/// @title AgentVault — AI-managed yield vault on Mantle
-/// @notice Users deposit MNT, AI agent decides yield strategy, profits auto-compound
+/// @title AgentVault — AI-managed yield vault with identity-gated execution
+/// @notice Only verified AI agents with sufficient reputation can execute strategies
 contract AgentVault {
     AgentIdentity public immutable identity;
     uint256 public immutable agentId;
@@ -20,7 +20,7 @@ contract AgentVault {
         bytes32 id;
         string name;
         address protocolAddress;
-        uint256 currentAPY; // basis points, 850 = 8.50%
+        uint256 currentAPY;
         uint256 totalAllocated;
         bool active;
     }
@@ -31,20 +31,29 @@ contract AgentVault {
 
     uint256 public totalDeposits;
     uint256 public totalShares;
-    uint256 public performanceFee = 1000; // 10%
+    uint256 public totalAllocated; // across all strategies, prevents double-allocation
+    uint256 public performanceFee = 1000;
 
     event Deposited(address indexed user, uint256 amount, uint256 shares);
     event StrategyExecuted(bytes32 indexed strategyId, uint256 amount, string reason);
     event Withdrawn(address indexed user, uint256 amount);
     event StrategyAdded(bytes32 indexed strategyId, string name, address protocol);
 
-    constructor(address _identityContract, string memory _agentName, string memory _model) {
+    constructor(address _identityContract, string memory _agentName, string memory _model, bytes32 _telegramIdHash) {
         identity = AgentIdentity(_identityContract);
-        agentId = identity.createAgent(_agentName, _model);
+        agentId = identity.createAgent(_agentName, _model, _telegramIdHash);
         vaultOwner = msg.sender;
     }
 
     modifier onlyVaultOwner() {
+        require(msg.sender == vaultOwner, "Not vault owner");
+        _;
+    }
+
+    /// @notice Only verified agent with sufficient reputation can execute strategies
+    modifier onlyAgent() {
+        (bool valid, ) = identity.verifyAgent(agentId);
+        require(valid, "Agent not verified or reputation too low");
         require(msg.sender == vaultOwner, "Not vault owner");
         _;
     }
@@ -88,23 +97,20 @@ contract AgentVault {
         emit StrategyAdded(strategyId, name, protocolAddress);
     }
 
-    /// @notice AI agent executes a yield strategy — the core on-chain AI action
-    /// @param strategyId The chosen strategy
-    /// @param amount Amount to allocate
-    /// @param apyBasisPoints Current APY observed by the AI agent
-    /// @param reason AI-generated explanation (IPFS hash or short text)
+    /// @notice AI agent executes a yield strategy — identity must be verified on-chain
     function executeStrategy(
         bytes32 strategyId,
         uint256 amount,
         uint256 apyBasisPoints,
         string calldata reason
-    ) external onlyVaultOwner {
+    ) external onlyAgent {
         Strategy storage strategy = strategies[strategyId];
         require(strategy.active, "Strategy not active");
-        require(amount <= totalDeposits, "Insufficient vault balance");
+        require(amount <= totalDeposits - totalAllocated, "Insufficient available balance");
 
         strategy.currentAPY = apyBasisPoints;
         strategy.totalAllocated += amount;
+        totalAllocated += amount;
 
         identity.logAction(
             agentId,
@@ -130,6 +136,29 @@ contract AgentVault {
         emit Withdrawn(msg.sender, amount);
     }
 
+    // ── Agent reputation management (proxied through vault since vault owns the agent) ──
+
+    function updateAgentReputation(int256 delta, string calldata reason)
+        external
+        onlyVaultOwner
+    {
+        identity.updateReputation(agentId, delta, reason);
+    }
+
+    function setAgentActive(bool active)
+        external
+        onlyVaultOwner
+    {
+        identity.setAgentStatus(agentId, active);
+    }
+
+    function updateMinReputation(uint256 threshold)
+        external
+        onlyVaultOwner
+    {
+        identity.setMinReputation(threshold);
+    }
+
     function getUserPosition(address user) external view returns (UserPosition memory) {
         return positions[user];
     }
@@ -146,7 +175,5 @@ contract AgentVault {
         return all;
     }
 
-    receive() external payable {
-        // fallback — treat as deposit
-    }
+    receive() external payable {}
 }
