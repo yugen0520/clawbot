@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ClawBot Economic Simulator — Mantle Turing Test Hackathon 2026</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+:root {
+  --bg: #0a0e14;
+  --card: #111820;
+  --border: #1e2736;
+  --accent: #00d4aa;
+  --accent-glow: rgba(0,212,170,0.15);
+  --accent-dim: rgba(0,212,170,0.08);
+  --text: #e8e8ec;
+  --text-dim: #8890a0;
+  --red: #f85149;
+  --orange: #d2991d;
+  --radius: 12px;
+}
+
+* { margin:0; padding:0; box-sizing:border-box; }
+
+body {
+  font-family: 'Inter', -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  line-height: 1.5;
+}
+
+canvas { display: block; max-width: 100%; }
+
+/* ---- Header ---- */
+header {
+  padding: 48px 24px 32px;
+  text-align: center;
+  border-bottom: 1px solid var(--border);
+}
+header h1 {
+  font-size: clamp(28px, 5vw, 48px);
+  font-weight: 900;
+  letter-spacing: -0.03em;
+  background: linear-gradient(135deg, var(--accent) 0%, #00ffcc 50%, #00a8cc 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  margin-bottom: 8px;
+}
+header .subtitle {
+  color: var(--text-dim);
+  font-size: clamp(14px, 2vw, 16px);
+  font-weight: 300;
+  letter-spacing: 0.05em;
+}
+
+/* ---- Layout ---- */
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 32px 20px 64px;
+}
+
+/* ---- Sliders Section ---- */
+.section-title {
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--accent);
+  margin-bottom: 18px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.section-title::before {
+  content: '';
+  width: 4px; height: 16px;
+  background: var(--accent);
+  border-radius: 2px;
+}
+
+.controls-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.control-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px 16px;
+  transition: border-color 0.2s;
+}
+.control-card:focus-within {
+  border-color: var(--accent);
+}
+
+.control-card label {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+}
+.control-card label .val {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.control-card input[type=range] {
+  -webkit-appearance: none;
+  width: 100%; height: 6px;
+  border-radius: 3px;
+  background: var(--border);
+  outline: none;
+  cursor: pointer;
+}
+.control-card input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 18px; height: 18px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+  box-shadow: 0 0 12px var(--accent-glow);
+  transition: box-shadow 0.2s;
+}
+.control-card input[type=range]::-webkit-slider-thumb:hover {
+  box-shadow: 0 0 24px rgba(0,212,170,0.4);
+}
+
+/* ---- Scenario Buttons ---- */
+.scenarios {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 32px;
+}
+
+.scenario-btn {
+  padding: 10px 20px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--text);
+  font-family: 'Inter', sans-serif;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.scenario-btn:hover {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+.scenario-btn.active {
+  border-color: var(--accent);
+  background: var(--accent-glow);
+  color: var(--accent);
+}
+
+/* ---- Metric Cards ---- */
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+  margin-bottom: 32px;
+}
+
+.metric-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  position: relative;
+  overflow: hidden;
+}
+.metric-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0;
+  width: 100%; height: 2px;
+}
+.metric-card.positive::before { background: var(--accent); }
+.metric-card.negative::before { background: var(--red); }
+.metric-card.warn::before { background: var(--orange); }
+
+.metric-card .label {
+  font-size: 12px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 6px;
+}
+.metric-card .value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: clamp(22px, 3vw, 30px);
+  font-weight: 600;
+}
+.metric-card.positive .value { color: var(--accent); }
+.metric-card.negative .value { color: var(--red); }
+.metric-card.warn .value { color: var(--orange); }
+
+.metric-card .sub {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 2px;
+}
+
+/* ---- Charts ---- */
+.charts-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 32px;
+}
+@media (max-width: 768px) {
+  .charts-grid { grid-template-columns: 1fr; }
+}
+
+.chart-wrapper {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+}
+.chart-wrapper h3 {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 14px;
+}
+
+/* ---- Footer ---- */
+footer {
+  text-align: center;
+  padding: 32px 20px;
+  border-top: 1px solid var(--border);
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1.8;
+}
+footer a {
+  color: var(--accent);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: border-color 0.2s;
+}
+footer a:hover { border-color: var(--accent); }
+
+.verdict {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 20px;
+  margin-bottom: 32px;
+  font-size: 14px;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.verdict .dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  margin-top: 5px;
+  flex-shrink: 0;
+}
+.verdict .dot.safe { background: var(--accent); box-shadow: 0 0 8px var(--accent-glow); }
+.verdict .dot.warn { background: var(--orange); box-shadow: 0 0 8px rgba(210,153,29,0.4); }
+.verdict .dot.danger { background: var(--red); box-shadow: 0 0 8px rgba(248,81,73,0.4); }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>ClawBot Economic Simulator</h1>
+  <p class="subtitle">AI Agent Economy &middot; Mantle Sepolia &middot; Sybil Defense Stress Test</p>
+</header>
+
+<div class="container">
+
+  <!-- Sliders -->
+  <div class="section-title">Parameters</div>
+  <div class="controls-grid">
+    <div class="control-card">
+      <label>Challenge Stake <span class="val" id="valStake">1,000</span> CLAW</label>
+      <input type="range" id="challengeStake" min="100" max="10000" value="1000" step="100">
+    </div>
+    <div class="control-card">
+      <label>Gas Price <span class="val" id="valGas">10</span> Gwei</label>
+      <input type="range" id="gasPrice" min="1" max="100" value="10" step="1">
+    </div>
+    <div class="control-card">
+      <label>Sybil Attackers <span class="val" id="valSybil">10</span></label>
+      <input type="range" id="sybilAttackers" min="1" max="100" value="10" step="1">
+    </div>
+    <div class="control-card">
+      <label>Bot Success Rate <span class="val" id="valSuccess">80</span>%</label>
+      <input type="range" id="successRate" min="50" max="100" value="80" step="1">
+    </div>
+    <div class="control-card">
+      <label>Daily Strategies <span class="val" id="valStrategies">200</span></label>
+      <input type="range" id="dailyStrategies" min="10" max="1000" value="200" step="10">
+    </div>
+  </div>
+
+  <!-- Presets -->
+  <div class="scenarios">
+    <button class="scenario-btn active" data-scene="normal">Normal Operation</button>
+    <button class="scenario-btn" data-scene="sybil">Sybil Attack</button>
+    <button class="scenario-btn" data-scene="bear">Bear Market</button>
+  </div>
+
+  <!-- Protocol Verdict -->
+  <div class="verdict" id="verdict">
+    <span class="dot safe" id="verdictDot"></span>
+    <span id="verdictText">Protocol is healthy and generating sustainable surplus.</span>
+  </div>
+
+  <!-- Metrics -->
+  <div class="section-title">Key Metrics (USD/day)</div>
+  <div class="metrics-grid">
+    <div class="metric-card positive">
+      <div class="label">Protocol Fee Revenue</div>
+      <div class="value" id="metricFee">$1,600.00</div>
+      <div class="sub">from strategy execution fees</div>
+    </div>
+    <div class="metric-card positive">
+      <div class="label">Guardian Rewards</div>
+      <div class="value" id="metricGuardian">$480.00</div>
+      <div class="sub">30% of protocol fees</div>
+    </div>
+    <div class="metric-card positive">
+      <div class="label">Bot Net Profit</div>
+      <div class="value" id="metricBot">$2,040.00</div>
+      <div class="sub">after gas & failed-strategy costs</div>
+    </div>
+    <div class="metric-card negative">
+      <div class="label">Malicious Challenger Loss</div>
+      <div class="value" id="metricAttacker">-$600.00</div>
+      <div class="sub">Sybil attackers losing stakes</div>
+    </div>
+    <div class="metric-card positive">
+      <div class="label">Annual Surplus (est.)</div>
+      <div class="value" id="metricAnnual">$408,800.00</div>
+      <div class="sub">projected yearly protocol surplus</div>
+    </div>
+  </div>
+
+  <!-- Charts -->
+  <div class="charts-grid">
+    <div class="chart-wrapper">
+      <h3>Participant P&L Breakdown</h3>
+      <canvas id="chartBar"></canvas>
+    </div>
+    <div class="chart-wrapper">
+      <h3>Attackers vs Defense Cost</h3>
+      <canvas id="chartLine"></canvas>
+    </div>
+  </div>
+
+</div>
+
+<footer>
+  <p>ClawBot Economic Simulator — AI-driven on-chain agent identity & asset management</p>
+  <p>Built for Mantle Turing Test Hackathon 2026 &middot; <a href="https://github.com/yugen0520/clawbot" target="_blank" rel="noopener">github.com/yugen0520/clawbot</a></p>
+</footer>
+
+<script>
+// ---- Economic Model Constants ----
+const CLAW_PRICE = 0.50;          // USD per CLAW
+const AVG_FEE_PER_STRATEGY = 20;  // CLAW
+const AVG_BOT_PROFIT = 30;        // CLAW per successful strategy
+const FAILED_STRATEGY_COST = 8;   // CLAW penalty for failed strategy
+const GUARDIAN_SHARE = 0.30;      // % of fees to guardians
+const CHALLENGES_PER_ATTACKER = 3; // avg challenges/day per sybil attacker
+const GAS_PER_STRATEGY = 250000;   // gas units per strategy execution
+const DEFENSE_GAS_PER_CHALLENGE = 180000; // gas to process a challenge
+const ETH_PRICE = 3000;           // USD per ETH (for gas cost conversion)
+
+// ---- DOM refs ----
+const sliders = {
+  challengeStake: document.getElementById('challengeStake'),
+  gasPrice: document.getElementById('gasPrice'),
+  sybilAttackers: document.getElementById('sybilAttackers'),
+  successRate: document.getElementById('successRate'),
+  dailyStrategies: document.getElementById('dailyStrategies'),
+};
+
+// ---- Calculations ----
+function gasToUSD(gwei) {
+  return (gwei * GAS_PER_STRATEGY / 1e9) * ETH_PRICE;
+}
+
+function defenseGasToUSD(gwei) {
+  return (gwei * DEFENSE_GAS_PER_CHALLENGE / 1e9) * ETH_PRICE;
+}
+
+function compute() {
+  const s = {
+    challengeStake: parseInt(sliders.challengeStake.value),
+    gasPrice: parseInt(sliders.gasPrice.value),
+    sybilAttackers: parseInt(sliders.sybilAttackers.value),
+    successRate: parseInt(sliders.successRate.value) / 100,
+    dailyStrategies: parseInt(sliders.dailyStrategies.value),
+  };
+
+  // Protocol fee revenue (USD/day)
+  const feeRevenue = s.dailyStrategies * AVG_FEE_PER_STRATEGY * CLAW_PRICE;
+
+  // Guardian rewards (USD/day)
+  const guardianRewards = feeRevenue * GUARDIAN_SHARE;
+
+  // Bot net profit:
+  // + profit from successful strategies
+  // - cost from failed strategies
+  // - gas costs for all strategies executed
+  const botGrossProfit = s.dailyStrategies * s.successRate * AVG_BOT_PROFIT * CLAW_PRICE;
+  const botFailedCost = s.dailyStrategies * (1 - s.successRate) * FAILED_STRATEGY_COST * CLAW_PRICE;
+  const gasTotal = s.dailyStrategies * gasToUSD(s.gasPrice);
+  const botNetProfit = botGrossProfit - botFailedCost - gasTotal;
+
+  // Malicious challenger loss:
+  // Attackers challenge legitimate strategies. When bot succeeds, challenger loses stake.
+  // When bot fails, challenger wins. Net: mostly negative for Sybil attackers.
+  const totalChallenges = s.sybilAttackers * CHALLENGES_PER_ATTACKER;
+  const challengerWinRate = 1 - s.successRate;
+  const challengerLoseAmount = s.challengeStake * s.successRate * CLAW_PRICE;
+  const challengerWinAmount = s.challengeStake * challengerWinRate * CLAW_PRICE;
+  const challengerNetPerChallenge = challengerWinAmount - challengerLoseAmount;
+  const challengerNet = totalChallenges * challengerNetPerChallenge;
+
+  // Annual surplus
+  const annualSurplus = (feeRevenue - guardianRewards + Math.abs(Math.min(0, challengerNet))) * 365;
+
+  // Protocol defense cost for challenges
+  const defenseCost = totalChallenges * defenseGasToUSD(s.gasPrice);
+
+  return { ...s, feeRevenue, guardianRewards, botNetProfit, challengerNet, annualSurplus, defenseCost, totalChallenges };
+}
+
+// ---- Update UI ----
+function formatUSD(n) {
+  const sign = n < 0 ? '-' : '';
+  return sign + '$' + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function updateDisplay(r) {
+  document.getElementById('valStake').textContent = r.challengeStake.toLocaleString();
+  document.getElementById('valGas').textContent = r.gasPrice;
+  document.getElementById('valSybil').textContent = r.sybilAttackers;
+  document.getElementById('valSuccess').textContent = Math.round(r.successRate * 100);
+  document.getElementById('valStrategies').textContent = r.dailyStrategies;
+
+  document.getElementById('metricFee').textContent = formatUSD(r.feeRevenue);
+  document.getElementById('metricGuardian').textContent = formatUSD(r.guardianRewards);
+  document.getElementById('metricBot').textContent = formatUSD(r.botNetProfit);
+  document.getElementById('metricAttacker').textContent = formatUSD(r.challengerNet);
+  document.getElementById('metricAnnual').textContent = formatUSD(r.annualSurplus);
+
+  // Verdict
+  const verdictDot = document.getElementById('verdictDot');
+  const verdictText = document.getElementById('verdictText');
+  if (r.annualSurplus > 100000 && r.challengerNet < -100) {
+    verdictDot.className = 'dot safe';
+    verdictText.textContent = 'Protocol is resilient — economic defenses are holding against Sybil attacks.';
+  } else if (r.annualSurplus > 0) {
+    verdictDot.className = 'dot warn';
+    verdictText.textContent = 'Protocol is breaking even but margins are thin. Consider raising challenge stake.';
+  } else {
+    verdictDot.className = 'dot danger';
+    verdictText.textContent = 'Protocol is losing money. Sybil attackers are overwhelming the economic model.';
+  }
+
+  updateCharts(r);
+}
+
+// ---- Charts ----
+let barChart, lineChart;
+
+function updateCharts(r) {
+  const ctx1 = document.getElementById('chartBar').getContext('2d');
+  const ctx2 = document.getElementById('chartLine').getContext('2d');
+
+  // Bar chart: participant P&L
+  const barData = {
+    labels: ['Protocol Fees', 'Guardians', 'Bots (net)', 'Attackers (net)'],
+    datasets: [{
+      data: [r.feeRevenue, r.guardianRewards, r.botNetProfit, r.challengerNet],
+      backgroundColor: [
+        'rgba(0,212,170,0.6)',
+        'rgba(0,180,216,0.5)',
+        'rgba(0,200,120,0.5)',
+        r.challengerNet < 0 ? 'rgba(248,81,73,0.5)' : 'rgba(210,153,29,0.5)',
+      ],
+      borderColor: [
+        '#00d4aa',
+        '#00b4d8',
+        '#00c878',
+        r.challengerNet < 0 ? '#f85149' : '#d2991d',
+      ],
+      borderWidth: 1.5,
+      borderRadius: 6,
+    }],
+  };
+
+  if (barChart) barChart.destroy();
+  barChart = new Chart(ctx1, {
+    type: 'bar',
+    data: barData,
+    options: {
+      responsive: true,
+      maintainAspectRatio: true,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: { label: ctx => ' ' + formatUSD(ctx.raw) },
+        },
+      },
+      scales: {
+        x: {
+          ticks: { color: '#8890a0', font: { family: 'Inter', size: 11 } },
+          grid: { display: false },
+        },
+        y: {
+          ticks: {
+            color: '#8890a0',
+            font: { family: 'JetBrains Mono', size: 10 },
+            callback: v => '$' + (v >= 1000 ? (v/1000).toFixed(1)+'k' : v),
+          },
+          grid: { color: 'rgba(30,39,54,0.5)' },
+        },
+      },
+    },
+  });
+
+  // Line chart: Attackers vs Defense Cost
+  // Generate curve: as attackers increase, defense cost rises, attacker losses accumulate
+  const attackerRange = [];
+  const defenseCostSeries = [];
+  const attackerLossSeries = [];
+  const protocolNetSeries = [];
+
+  for (let n = 1; n <= 100; n++) {
+    attackerRange.push(n);
+    const ch = n * CHALLENGES_PER_ATTACKER;
+    const dCost = ch * defenseGasToUSD(r.gasPrice);
+    defenseCostSeries.push(dCost);
+
+    // Attacker net at current success rate
+    const aLoss = ch * (r.challengeStake * r.successRate * CLAW_PRICE);
+    const aWin = ch * (r.challengeStake * (1 - r.successRate) * CLAW_PRICE);
+    attackerLossSeries.push(-(aLoss - aWin)); // negative = attacker losing
+
+    // Protocol net defense: attacker losses - defense cost
+    protocolNetSeries.push((aLoss - aWin) - dCost);
+  }
+
+  if (lineChart) lineChart.destroy();
+  lineChart = new Chart(ctx2, {
+    type: 'line',
+    data: {
+      labels: attackerRange,
+      datasets: [
+        {
+          label: 'Defense Cost (gas)',
+          data: defenseCostSeries,
+          borderColor: '#d2991d',
+          backgroundColor: 'transparent',
+          borderWidth: 1.5,
+          pointRadius: 0,
+          tension: 0.3,
+        },
+        {
+          label: 'Attacker Net Loss',
+          data: attackerLossSeries,
+          borderColor: '#f85149',
+          backgroundColor: 'transparent',
+          borderWidth: 2,
+          borderDash: [6, 3],
+          pointRadius: 0,
+          tension: 0.3,
+        },
+        {
+          label: 'Protocol Net Defense',
+          data: protocolNetSeries,
+          borderColor: '#00d4aa',
+          backgroundColor: 'rgba(0,212,170,0.08)',
+          borderWidth: 2,
+          fill: true,
+          pointRadius: 0,
+          tension: 0.3,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: true,
+      plugins: {
+        legend: {
+          labels: {
+            color: '#8890a0',
+            font: { family: 'Inter', size: 10 },
+            usePointStyle: true,
+            pointStyleWidth: 8,
+            padding: 16,
+          },
+        },
+        tooltip: {
+          callbacks: { label: ctx => ' ' + ctx.dataset.label + ': ' + formatUSD(ctx.raw) },
+        },
+      },
+      scales: {
+        x: {
+          title: { display: true, text: 'Number of Sybil Attackers', color: '#8890a0', font: { size: 10 } },
+          ticks: { color: '#505868', font: { family: 'JetBrains Mono', size: 9 }, maxTicksLimit: 8 },
+          grid: { display: false },
+        },
+        y: {
+          title: { display: true, text: 'USD per Day', color: '#8890a0', font: { size: 10 } },
+          ticks: {
+            color: '#8890a0',
+            font: { family: 'JetBrains Mono', size: 9 },
+            callback: v => '$' + (v >= 1000 ? (v/1000).toFixed(1)+'k' : v),
+          },
+          grid: { color: 'rgba(30,39,54,0.5)' },
+        },
+      },
+    },
+  });
+}
+
+// ---- Event handlers ----
+Object.values(sliders).forEach(sl => {
+  sl.addEventListener('input', () => updateDisplay(compute()));
+});
+
+// Preset scenarios
+const presets = {
+  normal: { challengeStake: 1000, gasPrice: 10, sybilAttackers: 10, successRate: 80, dailyStrategies: 200 },
+  sybil:   { challengeStake: 1000, gasPrice: 25, sybilAttackers: 80, successRate: 65, dailyStrategies: 300 },
+  bear:    { challengeStake: 500, gasPrice: 5, sybilAttackers: 20, successRate: 50, dailyStrategies: 50 },
+};
+
+document.querySelectorAll('.scenario-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.scenario-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+
+    const scene = presets[btn.dataset.scene];
+    Object.entries(scene).forEach(([key, val]) => {
+      sliders[key].value = val;
+    });
+    updateDisplay(compute());
+  });
+});
+
+// ---- Init ----
+updateDisplay(compute());
+</script>
+
+</body>
+</html>
