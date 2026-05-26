@@ -2,11 +2,14 @@
 pragma solidity ^0.8.20;
 
 import "./AgentIdentity.sol";
+import "./StrategyArbiter.sol";
 
 /// @title AgentVault — AI-managed yield vault with identity-gated execution
-/// @notice Only verified AI agents with sufficient reputation can execute strategies
+/// @notice Only verified AI agents with sufficient reputation can execute strategies.
+///         Integrates with StrategyArbiter for intent-publication + challenge-window flow.
 contract AgentVault {
     AgentIdentity public immutable identity;
+    StrategyArbiter public arbiter;
     uint256 public immutable agentId;
     address public vaultOwner;
 
@@ -164,6 +167,50 @@ contract AgentVault {
         onlyVaultOwner
     {
         identity.setMinReputation(threshold);
+    }
+
+    /// @notice Set the StrategyArbiter contract address (called once by vault owner)
+    function setArbiter(address payable _arbiter) external onlyVaultOwner {
+        arbiter = StrategyArbiter(_arbiter);
+    }
+
+    /// @notice Execute strategy WITH prior intent publication check.
+    ///         The intent must have been published, challenge window passed, and not blocked.
+    ///         Extension point: strategy steps from arbiter intent could be verified
+    ///         against actual on-chain execution trace in future versions using zkTLS.
+    function executeStrategyWithIntent(
+        uint256 intentId,
+        bytes32 strategyId,
+        uint256 amount,
+        uint256 apyBasisPoints,
+        string calldata reason
+    ) external onlyAgent {
+        require(address(arbiter) != address(0), "Arbiter not set");
+
+        // Verify intent is cleared for execution
+        (bool ok, string memory errReason) = arbiter.canExecute(intentId);
+        require(ok, errReason);
+
+        // Execute as normal
+        Strategy storage strategy = strategies[strategyId];
+        require(strategy.active, "Strategy not active");
+        require(amount <= totalDeposits - totalAllocated, "Insufficient available balance");
+
+        strategy.currentAPY = apyBasisPoints;
+        strategy.totalAllocated += amount;
+        totalAllocated += amount;
+
+        identity.logAction(
+            agentId,
+            keccak256("STRATEGY_EXECUTED"),
+            reason,
+            amount
+        );
+
+        // Mark intent as executed in arbiter
+        arbiter.markExecuted(intentId);
+
+        emit StrategyExecuted(strategyId, amount, reason);
     }
 
     function getUserPosition(address user) external view returns (UserPosition memory) {

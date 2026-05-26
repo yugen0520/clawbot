@@ -1,5 +1,20 @@
 import "dotenv/config";
 import { Bot, InlineKeyboard } from "grammy";
+import nodeFetch from "node-fetch";
+
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { HttpsProxyAgent } = require("https-proxy-agent") as { HttpsProxyAgent: any };
+
+const PROXY_URL = process.env.HTTPS_PROXY || process.env.https_proxy || "";
+const proxyAgent = PROXY_URL ? new HttpsProxyAgent(PROXY_URL) : undefined;
+
+function createProxiedFetch(): typeof nodeFetch {
+  if (!proxyAgent) return nodeFetch;
+  return ((url: any, init?: any) => {
+    return nodeFetch(url, { ...init, agent: proxyAgent as any });
+  }) as typeof nodeFetch;
+}
+
 import {
   processMessage,
   detectLanguageName,
@@ -19,6 +34,7 @@ import {
 } from "./defi-queries";
 import {
   initContracts,
+  setEthersProxy,
   getAgentInfo,
   getAgentActions,
   getAllStrategies,
@@ -27,6 +43,27 @@ import {
   getTotalDeposits,
   endorseOtherAgent,
   getAllAgents,
+  publishIntent,
+  challengeIntent,
+  resolveArbiterChallenge,
+  canExecute,
+  getIntent,
+  getBotInfo,
+  stakeAsBot,
+  stakeAsGuardianArbiter,
+  submitStrategyResult,
+  stakeAsSubmitter,
+  stakeAsGuardianReputation,
+  getEffectiveReputation,
+  getSubmitterInfo,
+  getFeeParams,
+  getPendingPools,
+  getTotalFeesCollected,
+  getArbiterIntentCount,
+  challengeResult,
+  voteOnChallenge,
+  resolveReputationChallenge,
+  finalizeResult,
   provider,
   signer,
   identityContract,
@@ -38,12 +75,18 @@ const RPC_URL = process.env.MANTLE_RPC_URL || "https://rpc.sepolia.mantle.xyz";
 const PRIVATE_KEY = process.env.PRIVATE_KEY || "";
 const VAULT_ADDR = process.env.AGENT_VAULT_ADDRESS || "";
 const IDENTITY_ADDR = process.env.AGENT_IDENTITY_ADDRESS || "";
+const REPUTATION_ADDR = process.env.REPUTATION_CALCULATOR_ADDRESS || "";
+const ARBITER_ADDR = process.env.STRATEGY_ARBITER_ADDRESS || "";
+const ECONOMIC_ADDR = process.env.ECONOMIC_MODEL_ADDRESS || "";
 
 if (BOT_TOKEN && PRIVATE_KEY && VAULT_ADDR && IDENTITY_ADDR) {
-  initContracts(RPC_URL, PRIVATE_KEY, VAULT_ADDR, IDENTITY_ADDR);
+  if (proxyAgent) setEthersProxy(proxyAgent);
+  initContracts(RPC_URL, PRIVATE_KEY, VAULT_ADDR, IDENTITY_ADDR, REPUTATION_ADDR || undefined, ARBITER_ADDR || undefined, ECONOMIC_ADDR || undefined);
 }
 
-const bot = new Bot(BOT_TOKEN);
+const bot = proxyAgent
+  ? new Bot(BOT_TOKEN, { client: { fetch: createProxiedFetch() as any } })
+  : new Bot(BOT_TOKEN);
 
 // Request logging
 bot.use(async (ctx, next) => {
@@ -85,7 +128,10 @@ bot.command("start", async (ctx) => {
     .text("Agent Info / Agent 信息", "agent")
     .row()
     .text("Agent Directory / Agent 目录", "agents_list")
-    .text("Check Balance / 查余额", "check_balance_prompt");
+    .text("Check Balance / 查余额", "check_balance_prompt")
+    .row()
+    .text("Reputation / 信誉查询", "reputation_check")
+    .text("Protocol Fees / 协议费用", "protocol_fees");
 
   await ctx.reply(
     [
@@ -97,9 +143,12 @@ bot.command("start", async (ctx) => {
       "",
       "• Find the best yield strategies / 找最高收益策略",
       "• Deposit into AI-optimized vaults / 存入 AI 优化金库",
-      "• Check on-chain wallet balance / 查链上钱包余额",
+      "• Publish strategy intents / 发布策略意图公示",
+      "• Challenge suspicious strategies / 挑战可疑策略",
+      "• Check agent reputation (on-chain) / 查链上信誉评分",
+      "• Stake as Bot or Guardian / 质押成为 Bot 或守护者",
       "",
-      "Try sending a wallet address, or ask: \"which pool has the highest APY?\" / \"哪个池子收益最高？\"",
+      "Commands: /agents /rate /publish /challenge /reputation /stake /guardians",
     ].join("\n"),
     { parse_mode: "Markdown", reply_markup: keyboard }
   );
@@ -230,6 +279,53 @@ bot.callbackQuery("agents_list", async (ctx) => {
   }
 });
 
+bot.callbackQuery("reputation_check", async (ctx) => {
+  await ctx.answerCallbackQuery();
+  const lang = getUserLang(ctx.chat?.id || 0);
+  try {
+    const agent = await getAgentInfo(0);
+    const effective = await getEffectiveReputation(0).catch(() => 0);
+    const lines = [
+      `*Agent #0 Reputation*`,
+      `Base score: ${(Number(agent.reputationScore) / 100).toFixed(0)}%`,
+      `Effective (decay-adjusted): ${(effective / 100).toFixed(0)}%`,
+      `Status: ${agent.isActive ? "Active" : "Inactive"}`,
+      `Actions: ${agent.actionCount.toString()}`,
+      "",
+      effective === 0 ? "ReputationCalculator not deployed yet — showing base score." : "Effective score computed by ReputationCalculator with APY, timeliness, and time-decay factors.",
+    ];
+    await replyBilingual(ctx, lines.join("\n"), { parse_mode: "Markdown" });
+  } catch {
+    await replyBilingual(ctx, "Reputation data unavailable. Ensure contracts are deployed.");
+  }
+});
+
+bot.callbackQuery("protocol_fees", async (ctx) => {
+  await ctx.answerCallbackQuery();
+  const lang = getUserLang(ctx.chat?.id || 0);
+  try {
+    const fees = await getFeeParams();
+    const pools = await getPendingPools();
+    const total = await getTotalFeesCollected();
+    const lines = [
+      "*Protocol Fee Structure (EconomicModel)*",
+      "",
+      `Registration fee: ${fees?.registrationFee || "N/A"} MNT`,
+      `Query fee: ${fees?.queryFee || "N/A"} MNT`,
+      `Matching fee: ${fees?.matchingFeeBasisPoints || "N/A"} bps (${(fees?.matchingFeeBasisPoints || 0) / 100}%)`,
+      "",
+      "*Distribution:*",
+      `Treasury: ${fees?.treasuryShare || 50}% | Guardians: ${fees?.guardianShare || 30}% | Agents: ${fees?.agentIncentiveShare || 20}%`,
+      "",
+      `Total collected: ${total} MNT`,
+      pools ? `Pending: ${pools.treasury} MNT (treasury) | ${pools.guardian} MNT (guardians) | ${pools.agent} MNT (agents)` : "",
+    ].filter(Boolean);
+    await replyBilingual(ctx, lines.join("\n"), { parse_mode: "Markdown" });
+  } catch {
+    await replyBilingual(ctx, "Economic model contract not deployed yet.");
+  }
+});
+
 // Execute strategy callback
 bot.callbackQuery(/^execute_/, async (ctx) => {
   await ctx.answerCallbackQuery();
@@ -352,6 +448,207 @@ bot.command("rate", async (ctx) => {
     await ctx.reply(text, { parse_mode: "Markdown" });
   } catch (e: any) {
     await replyBilingual(ctx, `Endorsement failed: ${e.message || "unknown"}`);
+  }
+});
+
+// ── New commands (judge feedback iteration) ──
+
+bot.command("publish", async (ctx) => {
+  const lang = getUserLang(ctx.chat?.id || 0);
+  const args = ctx.message?.text?.split(" ").slice(1) || [];
+  if (args.length < 4) {
+    await replyBilingual(ctx,
+      "Usage: `/publish <strategyId> <amountMNT> <apyBasisPoints> <stepsJson>`\n" +
+      "Example: `/publish AGNI_USDC 5 850 '[{\"action\":\"deposit\",\"protocol\":\"Agni\",\"amount\":\"5 MNT\"}]'`\n" +
+      "This publishes a strategy intent on-chain BEFORE execution. Guardians can challenge during the window.",
+      { parse_mode: "Markdown" }
+    );
+    return;
+  }
+  const strategyId = args[0];
+  const amountEth = args[1];
+  const apyBp = parseInt(args[2], 10);
+  const stepsJson = args.slice(3).join(" ");
+
+  if (isNaN(apyBp)) {
+    await replyBilingual(ctx, "Invalid APY basis points. Example: 850 = 8.5%");
+    return;
+  }
+
+  try {
+    const vaultAgentId = 0; // current agent
+    const intentId = await publishIntent(vaultAgentId, strategyId, amountEth, apyBp, stepsJson);
+    const text = await bilingual(
+      `*Strategy Intent Published #${intentId}*\n` +
+      `Strategy: ${strategyId}\nAmount: ${amountEth} MNT\nAPY: ${(apyBp / 100).toFixed(1)}%\n\n` +
+      `Guardians have ~180s to challenge. After window passes, execute with /execute_intent ${intentId}.`,
+      lang
+    );
+    await ctx.reply(text, { parse_mode: "Markdown" });
+  } catch (e: any) {
+    await replyBilingual(ctx, `Publish failed: ${e.message || "unknown"}. Ensure you have staked as Bot first (/stake bot <amount>).`);
+  }
+});
+
+bot.command("challenge", async (ctx) => {
+  const lang = getUserLang(ctx.chat?.id || 0);
+  const args = ctx.message?.text?.split(" ").slice(1) || [];
+  if (args.length < 2) {
+    await replyBilingual(ctx,
+      "Usage: `/challenge <intentId> <reason>`\n" +
+      "Example: `/challenge 3 Suspicious APY claim`\n" +
+      "Challenges cost 0.001 MNT (non-refundable). Must be a staked guardian.",
+      { parse_mode: "Markdown" }
+    );
+    return;
+  }
+  const intentId = parseInt(args[0], 10);
+  const reason = args.slice(1).join(" ");
+
+  if (isNaN(intentId)) {
+    await replyBilingual(ctx, "Invalid intent ID.");
+    return;
+  }
+
+  try {
+    const tx = await challengeIntent(intentId, reason, "0.001");
+    const text = await bilingual(
+      `*Challenge Submitted for Intent #${intentId}*\nReason: ${reason}\nTx: \`${tx.hash}\`\n\nGuardians can now vote. Use /resolve_challenge ${intentId} <true|false> to resolve.`,
+      lang
+    );
+    await ctx.reply(text, { parse_mode: "Markdown" });
+  } catch (e: any) {
+    await replyBilingual(ctx, `Challenge failed: ${e.message || "unknown"}. Ensure you are a staked guardian and within the challenge window.`);
+  }
+});
+
+bot.command("reputation", async (ctx) => {
+  const lang = getUserLang(ctx.chat?.id || 0);
+  const args = ctx.message?.text?.split(" ").slice(1) || [];
+  const agentId = args[0] ? parseInt(args[0], 10) : 0;
+
+  try {
+    const agent = await getAgentInfo(agentId);
+    const effective = await getEffectiveReputation(agentId).catch(() => 0);
+    const submitterInfo = await getSubmitterInfo(await signer.getAddress()).catch(() => null);
+    const lines = [
+      `*Agent #${agentId} Reputation*`,
+      `Name: ${agent.name}`,
+      `Base score: ${(Number(agent.reputationScore) / 100).toFixed(0)}%`,
+      `Effective (decay-adjusted): ${(effective / 100).toFixed(0)}%`,
+      `Actions: ${agent.actionCount.toString()}`,
+      `Managed: ${ethers.formatEther(agent.totalValueManaged)} MNT`,
+    ];
+    if (submitterInfo) {
+      lines.push("", "*Your Submitter Info:*",
+        `Staked: ${submitterInfo.totalStake} MNT`,
+        `Locked: ${submitterInfo.lockedStake} MNT`,
+        `Slashes: ${submitterInfo.slashCount}`,
+      );
+    }
+    if (effective === 0) {
+      lines.push("", "Note: ReputationCalculator not deployed — showing base score only.");
+    }
+    await replyBilingual(ctx, lines.join("\n"), { parse_mode: "Markdown" });
+  } catch (e: any) {
+    await replyBilingual(ctx, `Reputation query failed: ${e.message || "unknown"}`);
+  }
+});
+
+bot.command("stake", async (ctx) => {
+  const lang = getUserLang(ctx.chat?.id || 0);
+  const args = ctx.message?.text?.split(" ").slice(1) || [];
+  if (args.length < 2) {
+    await replyBilingual(ctx,
+      "Usage: `/stake <role> <amountMNT>`\n" +
+      "Roles: `bot` (Arbiter), `guardian_a` (Arbiter guardian), `submitter` (Reputation), `guardian_r` (Reputation guardian)\n" +
+      "Example: `/stake bot 0.1` or `/stake guardian_a 1`",
+      { parse_mode: "Markdown" }
+    );
+    return;
+  }
+  const role = args[0].toLowerCase();
+  const amount = args[1];
+
+  try {
+    let tx;
+    switch (role) {
+      case "bot": tx = await stakeAsBot(amount); break;
+      case "guardian_a": tx = await stakeAsGuardianArbiter(amount); break;
+      case "submitter": tx = await stakeAsSubmitter(amount); break;
+      case "guardian_r": tx = await stakeAsGuardianReputation(amount); break;
+      default:
+        await replyBilingual(ctx, `Unknown role: ${role}. Use bot, guardian_a, submitter, or guardian_r.`);
+        return;
+    }
+    const text = await bilingual(
+      `*Staked ${amount} MNT as ${role}*\nTx: \`${tx.hash}\``,
+      lang
+    );
+    await ctx.reply(text, { parse_mode: "Markdown" });
+  } catch (e: any) {
+    await replyBilingual(ctx, `Staking failed: ${e.message || "unknown"}`);
+  }
+});
+
+bot.command("guardians", async (ctx) => {
+  const lang = getUserLang(ctx.chat?.id || 0);
+  try {
+    const intentCount = await getArbiterIntentCount();
+    const botInfo = await getBotInfo(await signer.getAddress()).catch(() => null);
+    const lines = [
+      "*Guardian & Bot Status*",
+      "",
+      `Total intents published: ${intentCount}`,
+    ];
+    if (botInfo) {
+      lines.push("",
+        "*Your Bot Info (Arbiter):*",
+        `Staked: ${botInfo.totalStake} MNT`,
+        `Locked: ${botInfo.lockedStake} MNT`,
+        `Slashes: ${botInfo.slashCount}`,
+      );
+    }
+    lines.push("",
+      "Use `/stake guardian_a <amount>` to become an Arbiter guardian.",
+      "Use `/stake bot <amount>` to stake as a bot for publishing intents.",
+      "Use `/challenge <intentId> <reason>` to challenge a suspicious strategy intent.",
+    );
+    await replyBilingual(ctx, lines.join("\n"), { parse_mode: "Markdown" });
+  } catch (e: any) {
+    await replyBilingual(ctx, `Status query failed: ${e.message || "unknown"}`);
+  }
+});
+
+bot.command("resolve_challenge", async (ctx) => {
+  const lang = getUserLang(ctx.chat?.id || 0);
+  const args = ctx.message?.text?.split(" ").slice(1) || [];
+  if (args.length < 2) {
+    await replyBilingual(ctx,
+      "Usage: `/resolve_challenge <intentId> <true|false>`\n" +
+      "Example: `/resolve_challenge 3 true` (uphold challenge, slash bot)\n" +
+      "Must be a staked guardian.",
+      { parse_mode: "Markdown" }
+    );
+    return;
+  }
+  const intentId = parseInt(args[0], 10);
+  const uphold = args[1].toLowerCase() === "true";
+
+  if (isNaN(intentId)) {
+    await replyBilingual(ctx, "Invalid intent ID.");
+    return;
+  }
+
+  try {
+    const tx = await resolveArbiterChallenge(intentId, uphold);
+    const text = await bilingual(
+      `*Challenge Resolved for Intent #${intentId}*\nOutcome: ${uphold ? "UPHELD (bot slashed)" : "REJECTED (challenge failed)"}\nTx: \`${tx.hash}\``,
+      lang
+    );
+    await ctx.reply(text, { parse_mode: "Markdown" });
+  } catch (e: any) {
+    await replyBilingual(ctx, `Resolution failed: ${e.message || "unknown"}`);
   }
 });
 
@@ -570,6 +867,77 @@ bot.on("message:text", async (ctx) => {
       } catch {
         await replyBilingual(ctx, "Agent lookup failed.");
       }
+      break;
+    }
+
+    case "publish_intent": {
+      const amount = intent.amount || 0;
+      const strategy = intent.strategy || "AGNI_USDC";
+      const apyBp = 850; // default
+      if (amount <= 0) {
+        await ctx.reply(response + "\n\nPlease specify an amount. Example: \"publish 5 MNT to Agni\"", { parse_mode: "Markdown" });
+        return;
+      }
+      try {
+        const stepsJson = JSON.stringify([{ action: "deposit", protocol: strategy, amount: `${amount} MNT`, expectedAPY: `${(apyBp / 100).toFixed(1)}%` }]);
+        const intentId = await publishIntent(0, strategy, String(amount), apyBp, stepsJson);
+        const dataText = await bilingual(
+          `*Intent Published #${intentId}*\nStrategy: ${strategy}\nAmount: ${amount} MNT\nAPY: ${(apyBp / 100).toFixed(1)}%\n\nGuardians have ~180s to challenge.`,
+          userLang
+        );
+        await ctx.reply(`${response}\n\n${dataText}`, { parse_mode: "Markdown" });
+      } catch (e: any) {
+        await replyBilingual(ctx, `Publish failed: ${e.message || "unknown"}. Stake as bot first with /stake bot 0.1`);
+      }
+      break;
+    }
+
+    case "challenge_intent": {
+      const iid = intent.intentId || 0;
+      if (iid <= 0) {
+        await ctx.reply(response + "\n\nPlease specify an intent ID to challenge. Example: \"challenge intent 3\"", { parse_mode: "Markdown" });
+        return;
+      }
+      try {
+        const tx = await challengeIntent(iid, intent.rawQuery, "0.001");
+        const dataText = await bilingual(
+          `*Challenge Submitted for Intent #${iid}*\nTx: \`${tx.hash}\``,
+          userLang
+        );
+        await ctx.reply(`${response}\n\n${dataText}`, { parse_mode: "Markdown" });
+      } catch (e: any) {
+        await replyBilingual(ctx, `Challenge failed: ${e.message || "unknown"}`);
+      }
+      break;
+    }
+
+    case "check_reputation": {
+      const aid = intent.targetAgentId || 0;
+      try {
+        const agent = await getAgentInfo(aid);
+        const effective = await getEffectiveReputation(aid).catch(() => 0);
+        const repScore = Number(agent.reputationScore);
+        const repEmoji = repScore >= 7000 ? "🟢" : repScore >= 3000 ? "🟡" : "🔴";
+        const lines = [
+          `*Agent #${aid}:* ${agent.name}`,
+          `Base Rep: ${repEmoji} ${(repScore / 100).toFixed(0)}%`,
+          `Effective (decay-adjusted): ${(effective / 100).toFixed(0)}%`,
+          `Actions: ${agent.actionCount.toString()}`,
+          effective > 0 ? "Score computed on-chain by ReputationCalculator (APY + timeliness + time-decay)." : "ReputationCalculator not deployed — base score shown.",
+        ];
+        const dataText = await bilingual(lines.join("\n"), userLang);
+        await ctx.reply(`${response}\n\n${dataText}`, { parse_mode: "Markdown" });
+      } catch {
+        await replyBilingual(ctx, "Reputation query failed.");
+      }
+      break;
+    }
+
+    case "stake": {
+      await ctx.reply(
+        response + "\n\nUse `/stake <role> <amount>` to stake.\nRoles: `bot`, `guardian_a`, `submitter`, `guardian_r`\nExample: `/stake bot 0.1`",
+        { parse_mode: "Markdown" }
+      );
       break;
     }
 

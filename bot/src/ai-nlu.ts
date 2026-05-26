@@ -1,8 +1,14 @@
 import OpenAI from "openai";
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { HttpsProxyAgent } = require("https-proxy-agent") as { HttpsProxyAgent: any };
+
+const proxyUrl = process.env.HTTPS_PROXY || process.env.https_proxy || "";
+const openAiAgent = proxyUrl ? new HttpsProxyAgent(proxyUrl) : undefined;
 
 const deepseek = new OpenAI({
   apiKey: process.env.DEEPSEEK_API_KEY || "",
   baseURL: process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com/v1",
+  ...(openAiAgent ? { httpAgent: openAiAgent } : {}),
 });
 
 // Per-chat language storage
@@ -44,7 +50,7 @@ export async function translateText(english: string, targetLang: string): Promis
 }
 
 export interface ParsedIntent {
-  action: "deposit" | "withdraw" | "compare" | "invest" | "status" | "check_balance" | "rate_agent" | "lookup_agent" | "help" | "unknown";
+  action: "deposit" | "withdraw" | "compare" | "invest" | "status" | "check_balance" | "rate_agent" | "lookup_agent" | "publish_intent" | "challenge_intent" | "check_reputation" | "stake" | "help" | "unknown";
   amount?: number;
   token?: string;
   strategy?: string;
@@ -52,6 +58,7 @@ export interface ParsedIntent {
   targetAddress?: string;
   targetAgentId?: number;
   ratingScore?: number;
+  intentId?: number;
   rawQuery: string;
 }
 
@@ -98,12 +105,12 @@ const COMBINED_SYSTEM = `You are ClawBot, an AI DeFi assistant on Mantle Network
 You MUST output exactly two sections separated by "---RESPONSE---":
 
 ---INTENT---
-{"action":"<action>","amount":<number>,"token":"<string>","strategy":"<string>","riskLevel":"<level>","targetAddress":"<address>","targetAgentId":<number>,"ratingScore":<number>}
+{"action":"<action>","amount":<number>,"token":"<string>","strategy":"<string>","riskLevel":"<level>","targetAddress":"<address>","targetAgentId":<number>,"ratingScore":<number>,"intentId":<number>}
 ---RESPONSE---
 <your natural language reply here>
 
 Intent field rules:
-- action: "deposit" | "withdraw" | "compare" | "invest" | "status" | "check_balance" | "rate_agent" | "lookup_agent" | "help" | "unknown"
+- action: "deposit" | "withdraw" | "compare" | "invest" | "status" | "check_balance" | "rate_agent" | "lookup_agent" | "publish_intent" | "challenge_intent" | "check_reputation" | "stake" | "help" | "unknown"
 - amount: number (extract the number, 0 if none. "20 MNT" → amount:20, token:"MNT")
 - token: string (MNT / USDC etc., empty if none)
 - strategy: string ("highest yield" / "stable" / "lending" etc., empty if none)
@@ -111,6 +118,7 @@ Intent field rules:
 - targetAddress: string (0x-prefixed address copied verbatim from user message, empty if none)
 - targetAgentId: number (agent ID number if user mentions rating or looking up a specific agent, 0 if none)
 - ratingScore: number (1-5 score if rating an agent, 0 if none)
+- intentId: number (intent ID number for challenging or checking intent status, 0 if none)
 
 Action mapping:
 - Checking balance, wallet query → "check_balance"
@@ -119,6 +127,10 @@ Action mapping:
 - Checking portfolio, my assets, my status → "status"
 - Rating/endorsing an agent, giving stars: "rate agent 1 five stars" → "rate_agent" with targetAgentId:1, ratingScore:5
 - Looking up agents, asking about reputation, "show me all agents", agent directory → "lookup_agent" with optional targetAgentId
+- Publishing strategy before execution, "publish my strategy", "announce intent", "I want to execute a strategy on Agni" → "publish_intent"
+- Challenging a bad strategy, "challenge intent 3", "this strategy looks suspicious", "report fraud" → "challenge_intent" with intentId if specified
+- Checking reputation of agent, "what's agent 0's reputation", "show my reputation score", "how trustworthy is agent 1" → "check_reputation"
+- Staking tokens, "I want to stake", "stake 1 MNT as bot", "become a guardian", "stake to submit data" → "stake"
 - Help, greeting, unclear → "help"
 
 Response rules:
@@ -126,6 +138,8 @@ Response rules:
 - Be concise, professional, slightly playful
 - Format APY as percentage (e.g. "12.0%"), amounts with token symbol
 - Remind users to verify transactions before signing
+- For reputation queries, mention that reputation is now calculated on-chain by ReputationCalculator based on APY, timeliness, and time-decay
+- For strategy execution, remind users that strategies must be published as intents first (via /publish) and go through a challenge window
 
 Conversation history is provided for context. Use it to understand follow-up questions and pronouns like "that", "it", "the first one".
 

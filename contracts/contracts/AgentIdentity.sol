@@ -50,6 +50,7 @@ contract AgentIdentity {
     mapping(uint256 => mapping(uint256 => Endorsement)) public endorsements;
     mapping(uint256 => uint256) public endorsementCount;
     mapping(uint256 => uint256) public aggregateEndorsementScore;
+    mapping(address => bool) public authorizedReputationUpdaters;
 
     uint256 public minReputationForAction = 1000; // 10% minimum reputation
 
@@ -63,6 +64,11 @@ contract AgentIdentity {
 
     modifier onlyAgentOwner(uint256 agentId) {
         require(agentOwner[agentId] == msg.sender, "Not agent owner");
+        _;
+    }
+
+    modifier onlyAuthorizedUpdater() {
+        require(authorizedReputationUpdaters[msg.sender], "Not authorized updater");
         _;
     }
 
@@ -214,6 +220,39 @@ contract AgentIdentity {
 
         emit AgentEndorsed(raterAgentId, targetAgentId, score, reason);
         emit ReputationUpdated(targetAgentId, delta, target.reputationScore, reason);
+    }
+
+    // ── Authorized updater: allows external contracts (e.g. ReputationCalculator) ──
+    // to update reputation based on objective on-chain data
+
+    function setAuthorizedUpdater(address updater, bool authorized) external {
+        require(ownerAgents[msg.sender].length > 0, "Not an agent owner");
+        authorizedReputationUpdaters[updater] = authorized;
+    }
+
+    function updateReputationByUpdater(uint256 agentId, int256 delta, string calldata reason)
+        external
+        onlyAuthorizedUpdater
+    {
+        Agent storage agent = agents[agentId];
+        uint256 current = agent.reputationScore;
+
+        if (delta > 0) {
+            uint256 increase = uint256(delta);
+            agent.reputationScore = current + increase > 10000 ? 10000 : current + increase;
+        } else {
+            uint256 decrease = uint256(-delta);
+            agent.reputationScore = decrease >= current ? 0 : current - decrease;
+        }
+
+        reputationHistory[agentId].push(ReputationChange({
+            delta: delta,
+            newScore: agent.reputationScore,
+            reason: reason,
+            timestamp: block.timestamp
+        }));
+
+        emit ReputationUpdated(agentId, delta, agent.reputationScore, reason);
     }
 
     // ── View functions ──
