@@ -97,7 +97,7 @@ describe("EconomicModel", function () {
       await model.connect(agent).chargeRegistrationFee(agent.address, 1, { value: fee });
 
       const guardianBalanceBefore = await ethers.provider.getBalance(agent.address);
-      await model.claimGuardianRewards(agent.address, 1); // 1 total guardian
+      await model.connect(agent).claimGuardianRewards(agent.address, 1); // 1 total guardian
       const guardianBalanceAfter = await ethers.provider.getBalance(agent.address);
 
       expect(guardianBalanceAfter).to.be.gt(guardianBalanceBefore);
@@ -115,7 +115,7 @@ describe("EconomicModel", function () {
 
       const agentPoolBefore = (await model.getPendingPools()).agentPool;
 
-      await model.connect(treasury).allocateAgentIncentives([0, 1], [agent.address, agent.address]);
+      await model.connect(treasury).allocateAgentIncentives([0, 1]);
 
       // Agent can claim
       const balBefore = await ethers.provider.getBalance(agent.address);
@@ -140,6 +140,12 @@ describe("EconomicModel", function () {
     it("should update treasury address", async function () {
       await model.connect(treasury).setTreasury(agent.address);
       expect(await model.treasury()).to.equal(agent.address);
+    });
+
+    it("should reject setting treasury to zero address", async function () {
+      await expect(
+        model.connect(treasury).setTreasury(ethers.ZeroAddress)
+      ).to.be.revertedWith("Zero address");
     });
   });
 });

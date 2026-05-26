@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+import "./ZKPVerifier.sol";
+
 /// @title StrategyArbiter — On-chain strategy verification and dispute arbitration
 /// @notice Before executing a strategy, the Bot must publish the strategy intent on-chain.
 ///         A configurable challenge window starts, during which guardians can challenge.
@@ -9,6 +11,10 @@ pragma solidity ^0.8.20;
 ///
 ///         Extension point: future versions can integrate zkTLS proofs or verifiable inference
 ///         to replace guardian-based challenge with cryptographic verification of AI reasoning.
+///
+///         ZKP integration: bots can optionally submit a commitment hash alongside their
+///         intent, binding them to specific execution parameters. After execution, the
+///         commitment is revealed and verified against the IZKPVerifier contract.
 contract StrategyArbiter {
     // ── Strategy Intent ──
 
@@ -59,6 +65,19 @@ contract StrategyArbiter {
     mapping(address => uint256) public botStakes;
     mapping(address => uint256) public botLockedStake;
     mapping(address => uint256) public botSlashCount;
+    uint256 public pendingChallengeFees;
+
+    // ── ZKP Commitment (commit-reveal two-phase model) ──
+
+    struct StrategyCommitment {
+        bytes32 commitmentHash;       // keccak256(abi.encode(agentId, strategyId, amount, apyBps, salt))
+        uint256 intentId;             // Associated intent
+        bool revealed;                // Whether the commitment has been revealed
+        bool verified;                // Whether the reveal matched the commitment
+    }
+
+    mapping(uint256 => StrategyCommitment) public intentCommitments; // intentId → commitment
+    IZKPVerifier public zkpVerifier;
 
     // ── Configurable parameters ──
 
@@ -80,6 +99,9 @@ contract StrategyArbiter {
     event GuardianUnstaked(address indexed guardian, uint256 amount);
     event BotStaked(address indexed bot, uint256 amount);
     event BotSlashed(address indexed bot, uint256 amount, string reason);
+    event CommitmentSubmitted(uint256 indexed intentId, bytes32 commitmentHash);
+    event CommitmentRevealed(uint256 indexed intentId, bool verified);
+    event ZKPVerifierSet(address indexed verifier);
     event ParameterUpdated(string param, uint256 value);
 
     constructor() {}
@@ -98,7 +120,8 @@ contract StrategyArbiter {
         uint256 available = botStakes[msg.sender] - botLockedStake[msg.sender];
         require(amount <= available, "Insufficient available stake");
         botStakes[msg.sender] -= amount;
-        payable(msg.sender).transfer(amount);
+        (bool ok, ) = payable(msg.sender).call{value: amount}("");
+        require(ok, "Transfer failed");
     }
 
     // ── Guardian staking ──
@@ -120,7 +143,8 @@ contract StrategyArbiter {
         // Check: no active challenges
         guardianStakes[msg.sender] = 0;
         totalGuardianStaked -= amount;
-        payable(msg.sender).transfer(amount);
+        (bool ok, ) = payable(msg.sender).call{value: amount}("");
+        require(ok, "Transfer failed");
         emit GuardianUnstaked(msg.sender, amount);
     }
 
@@ -145,7 +169,8 @@ contract StrategyArbiter {
         uint256 amount,
         uint256 apyBasisPoints,
         string calldata stepsJson
-    ) external returns (uint256 intentId) {
+    ) public returns (uint256 intentId) {
+        require(vaultAddress != address(0), "Invalid vault address");
         uint256 available = botStakes[msg.sender] - botLockedStake[msg.sender];
         require(available >= minBotStake, "Insufficient bot stake");
 
@@ -187,6 +212,7 @@ contract StrategyArbiter {
         returns (uint256 challengeId)
     {
         require(msg.value >= challengeFee, "Insufficient challenge fee");
+        pendingChallengeFees += msg.value;
         StrategyIntent storage intent = intents[intentId];
         require(!intent.executed, "Already executed");
         require(!intent.challenged, "Already challenged");
@@ -240,7 +266,8 @@ contract StrategyArbiter {
             uint256 len = intentChallenges[intentId].length;
             if (len > 0) {
                 address challenger = intentChallenges[intentId][len - 1].challenger;
-                payable(challenger).transfer(botSlashAmount);
+                (bool ok2, ) = payable(challenger).call{value: botSlashAmount}("");
+                require(ok2, "Transfer failed");
             }
 
             emit BotSlashed(intent.executor, botSlashAmount, "Strategy challenge upheld");
@@ -288,7 +315,11 @@ contract StrategyArbiter {
         require(ok, "Intent not cleared for execution");
 
         intent.executed = true;
-        botLockedStake[intent.executor] -= minBotStake; // release locked stake
+
+        // Only unlock if not already unlocked by challenge resolution (rejected case)
+        if (!intent.challengeResolved) {
+            botLockedStake[intent.executor] -= minBotStake;
+        }
 
         emit IntentExecuted(intentId, intent.agentId);
     }
@@ -321,8 +352,102 @@ contract StrategyArbiter {
     }
 
     function setBotSlashAmount(uint256 _amount) external onlyGuardian {
+        require(_amount <= minBotStake, "Slash exceeds min bot stake");
         botSlashAmount = _amount;
         emit ParameterUpdated("botSlashAmount", _amount);
+    }
+
+    /// @notice Withdraw accumulated challenge fees to the treasury. Only guardian can call.
+    function withdrawChallengeFees(address to) external onlyGuardian {
+        require(to != address(0), "Invalid address");
+        uint256 amount = pendingChallengeFees;
+        pendingChallengeFees = 0;
+        (bool ok, ) = payable(to).call{value: amount}("");
+        require(ok, "Transfer failed");
+    }
+
+    // ── ZKP Commitment functions ──
+
+    /// @notice Set the ZKP verifier contract address
+    function setZKPVerifier(address _verifier) external onlyGuardian {
+        zkpVerifier = IZKPVerifier(_verifier);
+        emit ZKPVerifierSet(_verifier);
+    }
+
+    /// @notice Publish a strategy intent WITH a cryptographic commitment to execution parameters.
+    ///         Two-phase commit-reveal: Bot commits to (agentId, strategyId, amount, apyBps, salt)
+    ///         before execution, then reveals the parameters after. The commitment binds the bot
+    ///         to specific execution outcomes — false commitments can be challenged.
+    /// @param agentId        The agent proposing the strategy
+    /// @param vaultAddress   The vault that will execute
+    /// @param strategyId     Strategy identifier
+    /// @param amount         Amount to allocate
+    /// @param apyBasisPoints Expected APY
+    /// @param stepsJson      JSON strategy steps
+    /// @param commitmentHash keccak256(abi.encode(agentId, strategyId, amount, apyBps, salt))
+    /// @param salt           The random salt (stored for later verification)
+    /// @return intentId      ID of the published intent
+    function submitStrategyWithCommitment(
+        uint256 agentId,
+        address vaultAddress,
+        bytes32 strategyId,
+        uint256 amount,
+        uint256 apyBasisPoints,
+        string calldata stepsJson,
+        bytes32 commitmentHash,
+        bytes32 salt
+    ) external returns (uint256 intentId) {
+        // Verify commitment matches the provided parameters
+        bytes32 expected = keccak256(abi.encode(agentId, strategyId, amount, apyBasisPoints, salt));
+        require(commitmentHash == expected, "Commitment hash mismatch");
+
+        intentId = publishIntent(agentId, vaultAddress, strategyId, amount, apyBasisPoints, stepsJson);
+
+        intentCommitments[intentId] = StrategyCommitment({
+            commitmentHash: commitmentHash,
+            intentId: intentId,
+            revealed: false,
+            verified: false
+        });
+
+        emit CommitmentSubmitted(intentId, commitmentHash);
+    }
+
+    /// @notice Reveal the commitment after strategy execution and verify against ZKPVerifier.
+    ///         If a ZKP verifier is configured, also runs proof verification.
+    ///         Once revealed, the commitment is publicly auditable.
+    /// @param intentId The intent whose commitment to reveal
+    /// @param salt     The salt used in the original commitment
+    /// @param proof    Optional ZK proof bytes (empty if using lightweight commitment only)
+    /// @return verified True if the commitment matches and optional proof verifies
+    function revealCommitment(
+        uint256 intentId,
+        bytes32 salt,
+        bytes calldata proof
+    ) external returns (bool verified) {
+        StrategyIntent storage intent = intents[intentId];
+        StrategyCommitment storage c = intentCommitments[intentId];
+        require(c.commitmentHash != bytes32(0), "No commitment found");
+        require(!c.revealed, "Already revealed");
+        require(intent.executed, "Strategy not yet executed");
+
+        // Verify commitment matches execution parameters
+        verified = keccak256(abi.encode(
+            intent.agentId, intent.strategyId, intent.amount, intent.apyBasisPoints, salt
+        )) == c.commitmentHash;
+
+        if (verified && address(zkpVerifier) != address(0) && proof.length > 0) {
+            // Run full ZK proof verification if proof provided
+            bytes memory publicInputs = abi.encode(
+                intent.agentId, intent.strategyId, intent.amount, intent.apyBasisPoints
+            );
+            verified = zkpVerifier.verifyProof(proof, publicInputs);
+        }
+
+        c.revealed = true;
+        c.verified = verified;
+
+        emit CommitmentRevealed(intentId, verified);
     }
 
     // ── View helpers ──

@@ -56,29 +56,41 @@ describe("ClawBot Contracts", function () {
 
     it("should update reputation and record history", async function () {
       await identity.createAgent("RepBot", "GPT-5", ethers.encodeBytes32String("rep"));
-      await identity.updateReputation(1, 1000, "Good performance");
+      await identity.updateReputation(1, 500, "Good performance");
       const agent = await identity.getAgent(1);
-      expect(agent.reputationScore).to.equal(6000);
+      expect(agent.reputationScore).to.equal(5500);
 
       const histLen = await identity.getReputationHistoryLength(1);
       expect(histLen).to.equal(1n);
       const change = await identity.getReputationChange(1, 0);
-      expect(change.delta).to.equal(1000);
+      expect(change.delta).to.equal(500);
       expect(change.reason).to.equal("Good performance");
     });
 
     it("should cap reputation at 10000", async function () {
       await identity.createAgent("CapBot", "GPT-5", ethers.encodeBytes32String("cap"));
-      await identity.updateReputation(1, 9999, "Super positive");
+      await identity.setAuthorizedUpdater(owner.address, true);
+      await identity.updateReputationByUpdater(1, 9999, "Super positive");
       const agent = await identity.getAgent(1);
       expect(agent.reputationScore).to.equal(10000);
     });
 
     it("should floor reputation at 0", async function () {
       await identity.createAgent("FloorBot", "GPT-5", ethers.encodeBytes32String("floor"));
-      await identity.updateReputation(1, -9999, "Very bad");
+      await identity.setAuthorizedUpdater(owner.address, true);
+      await identity.updateReputationByUpdater(1, -9999, "Very bad");
       const agent = await identity.getAgent(1);
       expect(agent.reputationScore).to.equal(0);
+    });
+
+    it("should reject updateReputation with delta exceeding max", async function () {
+      await identity.createAgent("DeltaBot", "GPT-5", ethers.encodeBytes32String("delta"));
+      await expect(
+        identity.updateReputation(1, 600, "Too positive")
+      ).to.be.revertedWith("Delta exceeds max");
+      await expect(
+        identity.updateReputation(1, -600, "Too negative")
+      ).to.be.revertedWith("Delta exceeds max");
     });
 
     it("should log agent actions", async function () {
@@ -192,11 +204,11 @@ describe("ClawBot Contracts", function () {
       expect(valid).to.be.false;
     });
 
-    it("should proxy updateMinReputation through vault", async function () {
-      await vault.updateMinReputation(3000);
-      // Create agent with default 5000 rep, threshold now 3000 — should still pass
-      const [valid] = await identity.verifyAgent(0);
-      expect(valid).to.be.true;
+    it("should reject vault proxy of updateMinReputation (only owner can set)", async function () {
+      // setMinReputation now requires identity owner — vault cannot call it
+      await expect(
+        vault.updateMinReputation(3000)
+      ).to.be.revertedWith("Not owner");
     });
 
     it("should reject non-owner from proxy functions", async function () {
@@ -280,8 +292,9 @@ describe("ClawBot Contracts", function () {
     });
 
     it("should prevent endorsement from low-reputation agent", async function () {
-      // Reduce vault agent rep below threshold (1000)
-      await vault.updateAgentReputation(-4500, "Bad performance");
+      // Authorize owner as updater to bypass delta cap
+      await identity.setAuthorizedUpdater(owner.address, true);
+      await identity.updateReputationByUpdater(0, -4500, "Bad performance");
       await expect(
         vault.endorseOtherAgent(1, 5, "Low rep rater")
       ).to.be.revertedWith("Rater reputation too low");

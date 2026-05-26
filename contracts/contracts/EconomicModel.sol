@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+import "./GuardianRegistry.sol";
+import "./BotRegistry.sol";
+
 /// @title EconomicModel — Protocol fee structure and value capture
 /// @notice Defines the economic rules for the ClawBot protocol:
 ///         1. Agent identity registration fee (one-time, configurable)
@@ -44,11 +47,10 @@ interface IEconomicModel {
 ///
 ///         Distribution:
 ///         - treasuryShare → protocol treasury (upgrades, buybacks, ecosystem fund)
-///         - guardianShare → distributed to active guardians proportionally
-///         - agentIncentiveShare → distributed to top-N agents by reputation
+///         - guardianShare → distributed to registered guardians via GuardianRegistry
+///         - agentIncentiveShare → distributed to top-performing bots via BotRegistry
 ///
 ///         All ratios sum to 10000 bps, governance-adjustable.
-///         Extension point: could integrate a governance token for voting on parameters.
 contract EconomicModel is IEconomicModel {
     // ── Fee parameters (configurable) ──
 
@@ -74,11 +76,16 @@ contract EconomicModel is IEconomicModel {
 
     address public treasury;
 
-    // ── Guardian tracking for distribution ──
+    // ── Decentralized registries (replace inline tracking) ──
+
+    GuardianRegistry public guardianRegistry;
+    BotRegistry public botRegistry;
+
+    // ── Guardian tracking for distribution (backward compat) ──
 
     mapping(address => uint256) public guardianAccumulatedRewards;
 
-    // ── Agent incentive tracking ──
+    // ── Agent incentive tracking (backward compat) ──
 
     mapping(uint256 => uint256) public agentAccumulatedIncentives;
     uint256 public topAgentCount = 10; // top N agents share incentives
@@ -99,11 +106,11 @@ contract EconomicModel is IEconomicModel {
     event FeeParamsUpdated(uint256 registrationFee, uint256 queryFee, uint256 matchingFee);
     event GuardianRewardClaimed(address guardian, uint256 amount);
     event AgentIncentiveClaimed(uint256 agentId, uint256 amount);
+    event GuardianRegistrySet(address indexed registry);
+    event BotRegistrySet(address indexed registry);
 
     modifier onlyGovernance() {
-        // In production: check governance contract / DAO vote.
-        // For hackathon: the deployer is governance.
-        require(msg.sender == treasury || treasury == address(0), "Not governance");
+        require(msg.sender == treasury, "Not governance");
         _;
     }
 
@@ -141,9 +148,12 @@ contract EconomicModel is IEconomicModel {
 
     /// @notice Allocate received fee across the three distribution pools
     function _allocateFee(uint256 amount) internal {
-        pendingTreasuryFees += amount * treasuryShare / TOTAL_BPS;
-        pendingGuardianFees += amount * guardianShare / TOTAL_BPS;
-        pendingAgentIncentives += amount * agentIncentiveShare / TOTAL_BPS;
+        uint256 guardianAmount = amount * guardianShare / TOTAL_BPS;
+        uint256 agentAmount = amount * agentIncentiveShare / TOTAL_BPS;
+        uint256 treasuryAmount = amount - guardianAmount - agentAmount; // remainder to treasury, no dust
+        pendingTreasuryFees += treasuryAmount;
+        pendingGuardianFees += guardianAmount;
+        pendingAgentIncentives += agentAmount;
     }
 
     // ── Fee distribution ──
@@ -156,22 +166,28 @@ contract EconomicModel is IEconomicModel {
         totalFeesDistributed += treasuryAmount;
 
         if (treasuryAmount > 0 && treasury != address(0)) {
-            payable(treasury).transfer(treasuryAmount);
+            (bool ok, ) = payable(treasury).call{value: treasuryAmount}("");
+            require(ok, "Transfer failed");
         }
 
-        emit FeesDistributed(treasuryAmount, pendingGuardianFees, pendingAgentIncentives);
+        emit FeesDistributed(treasuryAmount, 0, 0);
     }
 
     /// @notice Guardian claims their share of accumulated guardian fees.
     ///         Distribution is equal among all guardians (simplified; in production:
     ///         weighted by stake amount or participation in challenges).
     function claimGuardianRewards(address guardian, uint256 totalGuardians) external {
+        require(msg.sender == guardian, "Not your rewards");
+        if (address(guardianRegistry) != address(0)) {
+            totalGuardians = guardianRegistry.guardianCount();
+        }
         require(totalGuardians > 0, "No guardians");
         uint256 share = pendingGuardianFees / totalGuardians;
         require(share > 0, "No rewards");
         pendingGuardianFees -= share;
         guardianAccumulatedRewards[guardian] += share;
-        payable(guardian).transfer(share);
+        (bool ok, ) = payable(guardian).call{value: share}("");
+        require(ok, "Transfer failed");
         emit GuardianRewardClaimed(guardian, share);
     }
 
@@ -180,18 +196,19 @@ contract EconomicModel is IEconomicModel {
         uint256 amount = agentAccumulatedIncentives[agentId];
         require(amount > 0, "No incentives");
         agentAccumulatedIncentives[agentId] = 0;
-        payable(msg.sender).transfer(amount);
+        (bool ok, ) = payable(msg.sender).call{value: amount}("");
+        require(ok, "Transfer failed");
         emit AgentIncentiveClaimed(agentId, amount);
     }
 
     /// @notice Governance allocates agent incentive pool to specific top-performing agents.
     ///         Called periodically (e.g., end of epoch) with ranked agent list.
-    function allocateAgentIncentives(uint256[] calldata agentIds, address[] calldata agentOwners) external onlyGovernance {
+    function allocateAgentIncentives(uint256[] calldata agentIds) external onlyGovernance {
         require(agentIds.length > 0, "Empty list");
-        require(agentIds.length == agentOwners.length, "Length mismatch");
         uint256 total = pendingAgentIncentives;
         uint256 perAgent = total / agentIds.length;
-        pendingAgentIncentives = 0;
+        uint256 distributed = perAgent * agentIds.length;
+        pendingAgentIncentives = total - distributed;
 
         for (uint256 i = 0; i < agentIds.length; i++) {
             agentAccumulatedIncentives[agentIds[i]] += perAgent;
@@ -201,6 +218,7 @@ contract EconomicModel is IEconomicModel {
     // ── Governance setters ──
 
     function setTreasury(address _treasury) external onlyGovernance {
+        require(_treasury != address(0), "Zero address");
         emit TreasuryUpdated(treasury, _treasury);
         treasury = _treasury;
     }
@@ -222,6 +240,65 @@ contract EconomicModel is IEconomicModel {
 
     function setTopAgentCount(uint256 _count) external onlyGovernance {
         topAgentCount = _count;
+    }
+
+    // ── Registry integration ──
+
+    /// @notice Set the GuardianRegistry contract for decentralized guardian tracking
+    function setGuardianRegistry(address _registry) external onlyGovernance {
+        guardianRegistry = GuardianRegistry(_registry);
+        emit GuardianRegistrySet(_registry);
+    }
+
+    /// @notice Set the BotRegistry contract for decentralized bot tracking
+    function setBotRegistry(address _registry) external onlyGovernance {
+        botRegistry = BotRegistry(_registry);
+        emit BotRegistrySet(_registry);
+    }
+
+    /// @notice Distribute guardian rewards through the registry.
+    ///         Rewards are split equally among all registered guardians.
+    function distributeGuardianRewards() external {
+        require(address(guardianRegistry) != address(0), "Registry not set");
+        uint256 total = pendingGuardianFees;
+        GuardianRegistry.Guardian[] memory allGuardians = guardianRegistry.getAllGuardians();
+
+        uint256 count = 0;
+        for (uint256 i = 0; i < allGuardians.length; i++) {
+            if (allGuardians[i].active) count++;
+        }
+        require(count > 0, "No guardians");
+
+        uint256 perGuardian = total / count;
+        uint256 distributed = perGuardian * count;
+        pendingGuardianFees = total - distributed;
+
+        for (uint256 i = 0; i < allGuardians.length; i++) {
+            if (allGuardians[i].active) {
+                guardianRegistry.addRewards(allGuardians[i].guardian, perGuardian);
+            }
+        }
+
+        emit FeesDistributed(pendingTreasuryFees, total, pendingAgentIncentives);
+    }
+
+    /// @notice Allocate agent incentives to top-performing bots from BotRegistry
+    function allocateAgentIncentivesFromRegistry() external {
+        require(address(botRegistry) != address(0), "Registry not set");
+        uint256 total = pendingAgentIncentives;
+        (address[] memory topBots, ) = botRegistry.getTopBots(topAgentCount);
+        uint256 count = 0;
+        for (uint256 i = 0; i < topBots.length; i++) {
+            if (topBots[i] != address(0)) count++;
+        }
+        require(count > 0, "No bots");
+        uint256 perBot = total / count;
+        uint256 distributed = perBot * count;
+        pendingAgentIncentives = total - distributed;
+
+        for (uint256 i = 0; i < count; i++) {
+            botRegistry.addRewards(topBots[i], perBot);
+        }
     }
 
     // ── View ──

@@ -52,7 +52,9 @@ contract AgentIdentity {
     mapping(uint256 => uint256) public aggregateEndorsementScore;
     mapping(address => bool) public authorizedReputationUpdaters;
 
+    address public owner;
     uint256 public minReputationForAction = 1000; // 10% minimum reputation
+    uint256 public constant MAX_REPUTATION_DELTA = 500; // max single reputation change
 
     event AgentCreated(uint256 indexed agentId, address indexed owner, string name, bytes32 telegramIdHash);
     event AgentAction(uint256 indexed agentId, bytes32 actionType, uint256 amount, string description);
@@ -67,9 +69,18 @@ contract AgentIdentity {
         _;
     }
 
+    modifier onlyOwner() {
+        require(msg.sender == owner, "Not owner");
+        _;
+    }
+
     modifier onlyAuthorizedUpdater() {
         require(authorizedReputationUpdaters[msg.sender], "Not authorized updater");
         _;
+    }
+
+    constructor() {
+        owner = msg.sender;
     }
 
     function createAgent(
@@ -113,8 +124,7 @@ contract AgentIdentity {
         emit AgentStatusChanged(agentId, active);
     }
 
-    function setMinReputation(uint256 threshold) external {
-        require(ownerAgents[msg.sender].length > 0, "Not an agent owner");
+    function setMinReputation(uint256 threshold) external onlyOwner {
         emit MinReputationUpdated(minReputationForAction, threshold);
         minReputationForAction = threshold;
     }
@@ -123,6 +133,7 @@ contract AgentIdentity {
         external
         onlyAgentOwner(agentId)
     {
+        require(delta <= int256(MAX_REPUTATION_DELTA) && delta >= -int256(MAX_REPUTATION_DELTA), "Delta exceeds max");
         Agent storage agent = agents[agentId];
         uint256 current = agent.reputationScore;
 
@@ -225,8 +236,7 @@ contract AgentIdentity {
     // ── Authorized updater: allows external contracts (e.g. ReputationCalculator) ──
     // to update reputation based on objective on-chain data
 
-    function setAuthorizedUpdater(address updater, bool authorized) external {
-        require(ownerAgents[msg.sender].length > 0, "Not an agent owner");
+    function setAuthorizedUpdater(address updater, bool authorized) external onlyOwner {
         authorizedReputationUpdaters[updater] = authorized;
     }
 
@@ -269,8 +279,8 @@ contract AgentIdentity {
         return agentActions[agentId][index];
     }
 
-    function getOwnerAgents(address owner) external view returns (uint256[] memory) {
-        return ownerAgents[owner];
+    function getOwnerAgents(address _owner) external view returns (uint256[] memory) {
+        return ownerAgents[_owner];
     }
 
     function getReputationHistoryLength(uint256 agentId) external view returns (uint256) {

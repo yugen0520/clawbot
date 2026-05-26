@@ -23,15 +23,14 @@ describe("ReputationCalculator", function () {
     calculator = await Calc.deploy(await identity.getAddress());
     await calculator.waitForDeployment();
 
-    // Create an agent and authorize calculator as updater
-    const tx = await identity.createAgent("TestBot", "DeepSeek-v4", ethers.encodeBytes32String("test"));
+    // Bot creates its own agent and authorizes calculator as updater
+    const tx = await identity.connect(bot).createAgent("TestBot", "DeepSeek-v4", ethers.encodeBytes32String("test"));
     await tx.wait();
     agentId = 0;
 
     await identity.setAuthorizedUpdater(await calculator.getAddress(), true);
 
     // Set a short challenge window for testing
-    // (calculator owner is not staked, so we need another approach)
   });
 
   describe("Staking", function () {
@@ -103,6 +102,21 @@ describe("ReputationCalculator", function () {
           "No stake"
         )
       ).to.be.revertedWith("Insufficient stake");
+    });
+
+    it("should reject submission from non-owner with stake", async function () {
+      // guardian2 stakes, but bot (agentId=0 owner) is the agent owner
+      await calculator.connect(guardian2).stakeAsSubmitter({ value: ethers.parseEther("0.1") });
+      await expect(
+        calculator.connect(guardian2).submitStrategyResult(
+          agentId,
+          ethers.encodeBytes32String("TEST"),
+          500, ethers.parseEther("1"),
+          Math.floor(Date.now() / 1000),
+          Math.floor(Date.now() / 1000),
+          "Not my agent"
+        )
+      ).to.be.revertedWith("Not the agent owner");
     });
   });
 
@@ -206,6 +220,33 @@ describe("ReputationCalculator", function () {
       // Effective reputation should decay back toward baseline
       const effective = await calculator.getEffectiveReputation(agentId);
       expect(effective).to.be.lte(repAfterGood);
+    });
+
+    it("should revert finalizeResult on non-existent result", async function () {
+      await expect(
+        calculator.finalizeResult(999)
+      ).to.be.revertedWith("Result not found");
+    });
+
+    it("should revert finalizeResult on challenged result", async function () {
+      const now = Math.floor(Date.now() / 1000);
+      await calculator.connect(bot).submitStrategyResult(
+        agentId, ethers.encodeBytes32String("TEST"),
+        800, ethers.parseEther("5"), now, now,
+        "Test"
+      );
+
+      // Guardian challenges within window
+      await calculator.connect(owner).challengeResult(0);
+
+      // Fast-forward past challenge window
+      await ethers.provider.send("evm_increaseTime", [10]);
+      await ethers.provider.send("evm_mine", []);
+
+      // finalizeResult should revert because result was challenged
+      await expect(
+        calculator.finalizeResult(0)
+      ).to.be.revertedWith("Challenged result, use resolveChallenge");
     });
   });
 
@@ -344,7 +385,7 @@ describe("ReputationCalculator", function () {
     it("should reject non-owner setting authorized updater", async function () {
       await expect(
         identity.connect(bot).setAuthorizedUpdater(bot.address, true)
-      ).to.be.revertedWith("Not an agent owner");
+      ).to.be.revertedWith("Not owner");
     });
   });
 

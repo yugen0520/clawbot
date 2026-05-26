@@ -107,6 +107,7 @@ contract AgentVault {
         uint256 apyBasisPoints,
         string calldata reason
     ) external onlyAgent {
+        require(amount > 0, "Zero amount");
         Strategy storage strategy = strategies[strategyId];
         require(strategy.active, "Strategy not active");
         require(amount <= totalDeposits - totalAllocated, "Insufficient available balance");
@@ -135,7 +136,8 @@ contract AgentVault {
         totalDeposits -= amount;
         totalShares -= shares;
 
-        payable(msg.sender).transfer(amount);
+        (bool ok, ) = payable(msg.sender).call{value: amount}("");
+        require(ok, "Transfer failed");
         emit Withdrawn(msg.sender, amount);
     }
 
@@ -169,8 +171,9 @@ contract AgentVault {
         identity.setMinReputation(threshold);
     }
 
-    /// @notice Set the StrategyArbiter contract address (called once by vault owner)
+    /// @notice Set the StrategyArbiter contract address (callable once by vault owner)
     function setArbiter(address payable _arbiter) external onlyVaultOwner {
+        require(address(arbiter) == address(0), "Arbiter already set");
         arbiter = StrategyArbiter(_arbiter);
     }
 
@@ -185,6 +188,7 @@ contract AgentVault {
         uint256 apyBasisPoints,
         string calldata reason
     ) external onlyAgent {
+        require(amount > 0, "Zero amount");
         require(address(arbiter) != address(0), "Arbiter not set");
 
         // Verify intent is cleared for execution

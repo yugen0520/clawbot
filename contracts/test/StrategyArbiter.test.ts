@@ -257,6 +257,12 @@ describe("StrategyArbiter", function () {
       ).to.be.revertedWith("Arbiter not set");
     });
 
+    it("should reject setting arbiter twice", async function () {
+      await expect(
+        vault.setArbiter(await arbiter.getAddress())
+      ).to.be.revertedWith("Arbiter already set");
+    });
+
     it("should maintain backward compatibility: existing executeStrategy still works", async function () {
       const stratId = ethers.encodeBytes32String("AGNI_USDC");
       await vault.executeStrategy(
@@ -265,6 +271,36 @@ describe("StrategyArbiter", function () {
       );
       const strategies = await vault.getAllStrategies();
       expect(strategies[0].totalAllocated).to.equal(ethers.parseEther("5"));
+    });
+
+    it("should allow execution after challenge is rejected (no double-unlock)", async function () {
+      const stratId = ethers.encodeBytes32String("AGNI_USDC");
+
+      await arbiter.connect(bot).publishIntent(
+        0, await vault.getAddress(), stratId,
+        ethers.parseEther("5"), 850, "[]"
+      );
+
+      // Guardian challenges
+      await arbiter.connect(guardian).challengeIntent(0, "Spam challenge", {
+        value: ethers.parseEther("0.001")
+      });
+
+      // Challenge resolved: rejected (bot wins, stake unlocked)
+      await arbiter.connect(guardian).resolveChallenge(0, false);
+
+      // Fast-forward past challenge window
+      await ethers.provider.send("evm_increaseTime", [10]);
+      await ethers.provider.send("evm_mine", []);
+
+      // Should NOT revert from botLockedStake underflow
+      await vault.executeStrategyWithIntent(
+        0, stratId, ethers.parseEther("5"), 850,
+        "Executed after challenge rejected"
+      );
+
+      const intent = await arbiter.intents(0);
+      expect(intent.executed).to.be.true;
     });
   });
 });

@@ -123,7 +123,8 @@ contract ReputationCalculator {
         uint256 available = submitterStakes[msg.sender] - submitterLockedStake[msg.sender];
         require(amount <= available, "Insufficient available stake");
         submitterStakes[msg.sender] -= amount;
-        payable(msg.sender).transfer(amount);
+        (bool ok, ) = payable(msg.sender).call{value: amount}("");
+        require(ok, "Transfer failed");
     }
 
     /// @notice Community member stakes to become a guardian — can challenge invalid data
@@ -141,7 +142,8 @@ contract ReputationCalculator {
         uint256 amount = guardianStakes[msg.sender];
         require(amount > 0, "Not a guardian");
         guardianStakes[msg.sender] = 0;
-        payable(msg.sender).transfer(amount);
+        (bool ok, ) = payable(msg.sender).call{value: amount}("");
+        require(ok, "Transfer failed");
         emit GuardianUnstaked(msg.sender, amount);
     }
 
@@ -149,6 +151,7 @@ contract ReputationCalculator {
 
     /// @notice Bot submits a strategy execution result. Must have sufficient stake.
     ///         A portion of stake is locked during the challenge window.
+    ///         Only the agent owner can submit results for their own agent.
     /// @param agentId       The agent that executed the strategy
     /// @param strategyId    Identifier of the strategy
     /// @param apyBasisPoints Actual realized APY in basis points
@@ -168,6 +171,7 @@ contract ReputationCalculator {
     ) external returns (uint256 resultId) {
         uint256 available = submitterStakes[msg.sender] - submitterLockedStake[msg.sender];
         require(available >= minSubmitterStake, "Insufficient stake");
+        require(msg.sender == identity.agentOwner(agentId), "Not the agent owner");
 
         resultId = resultCount++;
         uint256 lockAmount = minSubmitterStake;
@@ -276,10 +280,12 @@ contract ReputationCalculator {
     }
 
     /// @notice After challenge window passes without challenge, finalize the result and compute reputation delta
-    ///         Anyone can call this after the window expires.
+    ///         Anyone can call this after the window expires. Reverts if the result was challenged.
     function finalizeResult(uint256 resultId) external {
+        require(resultId < resultCount, "Result not found");
         StrategyResult storage result = results[resultId];
         require(!result.resolved, "Already resolved");
+        require(!result.challenged, "Challenged result, use resolveChallenge");
         require(block.timestamp > result.submissionTimestamp + challengeWindow, "Challenge window still open");
 
         result.resolved = true;
@@ -299,7 +305,7 @@ contract ReputationCalculator {
     ///         time-decay weight (applied at accumulation level), failure penalty.
     /// @param result The strategy result to evaluate
     /// @return delta The net reputation change (can be positive or negative)
-    function computeReputationDelta(StrategyResult memory result) public view returns (int256 delta) {
+    function computeReputationDelta(StrategyResult storage result) internal view returns (int256 delta) {
         // 1. APY performance vs benchmark
         if (result.apyBasisPoints >= benchmarkAPY) {
             // Bonus: (APY - benchmark) * multiplier / 100
@@ -392,6 +398,7 @@ contract ReputationCalculator {
     /// @notice Submit a strategy failure/default record — auto penalty, no challenge window needed
     function reportDefault(uint256 agentId, string calldata reason) external {
         require(submitterStakes[msg.sender] >= minSubmitterStake, "Insufficient stake");
+        require(msg.sender == identity.agentOwner(agentId), "Not the agent owner");
         _applyReputationUpdate(agentId, defaultPenalty, reason);
     }
 
