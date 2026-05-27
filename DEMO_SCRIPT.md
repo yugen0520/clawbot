@@ -1,12 +1,12 @@
 # ClawBot Demo 视频脚本
 
-> 2 分钟 | 中文旁白 | 左边 Telegram Bot @ccmiao，右边 Mantle 区块浏览器
+> 125s | English narration (GLM-5V-Turbo + edge-tts) | Left: Telegram Bot / Right: Mantle Block Explorer
 
 ---
 
 ## 前置准备（录视频前完成，不占 demo 时间）
 
-打开 Telegram @ccmiao，依次发送：
+打开 Telegram ClawBot，依次发送：
 
 ```
 /stake bot 0.1
@@ -85,7 +85,7 @@
 
 ## 录屏设置
 
-- 左边 Telegram @ccmiao（占画面 55%）
+- 左边 Telegram ClawBot（占画面 55%）
 - 右边 Mantle Sepolia 区块浏览器（占画面 45%）
 - 分辨率 1920×1080，30fps
 - 旁白用 Audacity 单独录制后混入

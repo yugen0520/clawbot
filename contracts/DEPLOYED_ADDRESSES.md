@@ -9,7 +9,7 @@
 | 1 | AgentIdentity | `0xf964Cc79b454218e18aCCdDDD402F0A0f6407052` |
 | 2 | StrategyArbiter | `0x13f11cA1A37a516Ca3D7b7C093AFB069DBf9C056` |
 | 3 | ChallengeMechanism | `0x53cdf1E9aC1BC318e6a84d4bb650a1fED294a7A3` |
-| 4 | CommitmentVerifier | `0xd4dC6F897B870D97a36Fe70d5D674e33117A092D` |
+| 4 | ZKPVerifier | `0xd4dC6F897B870D97a36Fe70d5D674e33117A092D` |
 | 5 | GuardianRegistry | `0x9885E0445c68388123561FB76A09B66F806c96Ea` |
 | 6 | BotRegistry | `0xeC7087DE8b4c6ebeDc6118b73d8EEf0900fCeDBb` |
 | 7 | ReputationCalculator | `0x5c6870BD7340cf8D9Bc98CcA23C8C2d5dde0D11D` |

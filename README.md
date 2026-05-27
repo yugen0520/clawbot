@@ -66,7 +66,7 @@ User (Telegram)
 | `AgentVault` | AI 管理收益金库。身份门控执行策略，支持意图发布 + 挑战窗口流程 |
 | `StrategyArbiter` | 策略意图发布、Bot 质押、守护者挑战。执行前强制挑战窗口 |
 | `ChallengeMechanism` | Pandora's Box 多轮递增挑战博弈。挑战者与 Bot 轮流加注，上限后守护者仲裁 |
-| `CommitmentVerifier` | Commit-Reveal 验证器，Binding Bot 到具体执行参数，执行后揭示并验证 |
+| `ZKPVerifier` | Commit-Reveal 验证器，Binding Bot 到具体执行参数，执行后揭示并验证 |
 
 ### Registries & Economics
 | 合约 | 用途 |
