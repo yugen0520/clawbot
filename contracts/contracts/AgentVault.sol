@@ -37,6 +37,8 @@ contract AgentVault {
     uint256 public totalAllocated; // across all strategies, prevents double-allocation
     uint256 public performanceFee = 1000;
 
+    bytes32 private constant STRATEGY_EXECUTED_TYPE = keccak256("STRATEGY_EXECUTED");
+
     event Deposited(address indexed user, uint256 amount, uint256 shares);
     event StrategyExecuted(bytes32 indexed strategyId, uint256 amount, string reason);
     event Withdrawn(address indexed user, uint256 amount);
@@ -118,7 +120,7 @@ contract AgentVault {
 
         identity.logAction(
             agentId,
-            keccak256("STRATEGY_EXECUTED"),
+            STRATEGY_EXECUTED_TYPE,
             reason,
             amount
         );
@@ -206,7 +208,7 @@ contract AgentVault {
 
         identity.logAction(
             agentId,
-            keccak256("STRATEGY_EXECUTED"),
+            STRATEGY_EXECUTED_TYPE,
             reason,
             amount
         );

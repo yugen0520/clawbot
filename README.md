@@ -52,21 +52,30 @@ User (Telegram)
 +-----------------------------------------+
 ```
 
-## Smart Contracts
+## Smart Contracts (9/9 deployed on Mantle Sepolia)
 
-### AgentIdentity
-ERC-8004 inspired agent identity. Each AI agent gets an on-chain identity with immutable action log — every strategy execution, rebalance, and yield claim is permanently recorded.
+### Identity & Reputation
+| 合约 | 用途 |
+|------|------|
+| `AgentIdentity` | AI Agent 链上身份 NFT，不可转让。记录行为日志、动态信誉评分、Agent 间背书 |
+| `ReputationCalculator` | 去中心化信誉算法：APY 表现、执行时效、时间衰减。Bot 提交数据、守护者投票仲裁 |
 
-### AgentVault
-AI-managed yield vault. Users deposit MNT, the agent allocates capital across Mantle DeFi protocols. Multiple strategies with live APY tracking.
+### Execution & Security
+| 合约 | 用途 |
+|------|------|
+| `AgentVault` | AI 管理收益金库。身份门控执行策略，支持意图发布 + 挑战窗口流程 |
+| `StrategyArbiter` | 策略意图发布、Bot 质押、守护者挑战。执行前强制挑战窗口 |
+| `ChallengeMechanism` | Pandora's Box 多轮递增挑战博弈。挑战者与 Bot 轮流加注，上限后守护者仲裁 |
+| `CommitmentVerifier` | Commit-Reveal 验证器，Binding Bot 到具体执行参数，执行后揭示并验证 |
 
-| Function | Access | Description |
-|----------|--------|-------------|
-| `deposit()` | Public | Deposit MNT into the vault |
-| `addStrategy(...)` | Vault Owner | Register a new DeFi strategy |
-| `executeStrategy(id, amount, apy, reason)` | Vault Owner | AI agent executes allocation — **on-chain AI action** |
-| `withdraw(shares)` | Public | Withdraw MNT + accrued yield |
-| `getAllStrategies()` | Public | List all active strategies with APY |
+### Registries & Economics
+| 合约 | 用途 |
+|------|------|
+| `GuardianRegistry` | 去中心化守护者身份注册与质押。守护者参与挑战投票和仲裁 |
+| `BotRegistry` | 去中心化 Bot 身份注册与质押。Bot 发布策略、执行交易、获取激励 |
+| `EconomicModel` | 协议收费模型：注册费 + 查询费 + 匹配费 → 国库/守护者/Agent 三方分配 |
+
+> 完整部署地址见 [DEPLOYED_ADDRESSES.md](./DEPLOYED_ADDRESSES.md)
 
 ## Project Structure
 
@@ -75,9 +84,16 @@ clawbot/
 ├── contracts/              # Solidity (Hardhat)
 │   ├── contracts/
 │   │   ├── AgentIdentity.sol
-│   │   └── AgentVault.sol
-│   ├── scripts/deploy.ts
-│   └── test/ClawBot.test.ts   (5/5 passing)
+│   │   ├── AgentVault.sol
+│   │   ├── StrategyArbiter.sol
+│   │   ├── ChallengeMechanism.sol
+│   │   ├── ReputationCalculator.sol
+│   │   ├── EconomicModel.sol
+│   │   ├── GuardianRegistry.sol
+│   │   ├── BotRegistry.sol
+│   │   └── ZKPVerifier.sol
+│   ├── scripts/deploy_all.ts
+│   └── test/   (166/166 passing)
 ├── bot/                    # Telegram Bot (Node.js)
 │   └── src/
 │       ├── index.ts        # Bot entry, message routing
@@ -101,8 +117,8 @@ cd contracts
 cp .env.example .env   # Add PRIVATE_KEY
 npm install
 npx hardhat compile
-npx hardhat test        # 5/5 passing
-npx hardhat run scripts/deploy.ts --network mantleSepolia
+npx hardhat test        # 166/166 passing
+npx hardhat run scripts/deploy_all.ts --network mantleSepolia  # 部署全部 9 个合约
 ```
 
 Note the deployed AgentIdentity and AgentVault addresses for the next steps.
@@ -144,11 +160,12 @@ npm run build           # Static export → out/
 - **Network:** Mantle Sepolia Testnet
 
 ### Qualification Checklist
-- [x] Smart contract deployed on Mantle Testnet
-- [x] Contract verified on Mantle Explorer
-- [x] AI-powered function callable on-chain (`executeStrategy`)
-- [x] Agent identity with on-chain action logging
+- [x] 9 smart contracts deployed on Mantle Sepolia Testnet
+- [x] 166 tests passing, zero compilation warnings
+- [x] AI-powered on-chain execution (`executeStrategyWithIntent`)
+- [x] Agent identity with on-chain reputation + endorsements
 - [x] Open source (MIT)
+- [x] 8 on-chain test transactions verified (see DEPLOYED_ADDRESSES.md)
 
 ## Why This Wins
 
@@ -162,6 +179,29 @@ npm run build           # Static export → out/
 - **AI intent parsing:** DeepSeek occasionally misclassifies compound intents. Mitigated with structured system prompts and inline keyboard fallbacks.
 - **Mantle RPC rate limiting:** Configured multiple backup RPC providers for reliable pool data queries.
 - **Agent ownership model:** The vault contract creates and owns the agent identity, while a human vault owner authorizes strategy execution — clean separation of concerns.
+
+## Demo
+
+▶ **[Watch Demo Video](demo/demo-video.mp4)** (2 min, 125s — English narration)
+
+Walkthrough: Split-screen Telegram + Mantle explorer → staking → strategies → challenge mechanism → multi-agent endorsements → 9-contract deployment summary.
+
+*Click to watch in-browser, or right-click to download.*
+
+## Pitch (200-500 words for hackathon submission)
+
+ClawBot is an AI-powered DeFi butler that turns natural language into verifiable on-chain execution — all from a Telegram chat.
+
+**The problem:** On-chain AI agents are multiplying, but there's no standard mechanism to verify whether an address is controlled by a human or an AI. This enables Sybil attacks in DAO voting, fake social engagement, and unaccountable autonomous agents that can drain user funds without recourse.
+
+**Our solution:** A four-layer architecture where every AI action is identity-gated, reputation-weighted, and permanently auditable.
+
+1. **Bot Layer** — Users interact via Telegram. Natural language commands like "invest 50 MNT into the highest APY pool" are parsed by DeepSeek into multi-step execution plans (balance check → APY scan → strategy comparison → authorization → execution).
+2. **Identity Layer** (AgentIdentity.sol) — Every AI agent gets a non-transferable on-chain NFT recording its creation time, model version, Telegram ID hash, and dynamically updated behavior log with reputation score.
+3. **Execution Layer** (AgentVault + StrategyArbiter + ChallengeMechanism) — The vault holds user funds. Before any strategy executes, the arbiter enforces an intent-publication window where guardians can challenge the decision. The Pandora's Box mechanism creates escalating stakes: challenger and bot trade increasing deposits until a cap triggers guardian arbitration.
+4. **Verification Layer** — All 9 smart contracts operate on Mantle Sepolia, creating a complete trust chain: User → Telegram → AI reasoning → on-chain identity → permission check → asset execution. Every step is logged on-chain.
+
+**Why this wins:** Natural language is the killer UX for DeFi. On-chain agent reputation solves the "black box AI" trust problem. Working end-to-end — not a mockup — with 166 tests, zero compilation warnings, and 8 verified on-chain transactions.
 
 ## Team
 

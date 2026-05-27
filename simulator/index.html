@@ -6,6 +6,7 @@
 <title>ClawBot Economic Simulator — Mantle Turing Test Hackathon 2026</title>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;900&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
 <style>
 :root {
   --bg: #0a0e14;
@@ -277,6 +278,11 @@ footer a:hover { border-color: var(--accent); }
 .verdict .dot.safe { background: var(--accent); box-shadow: 0 0 8px var(--accent-glow); }
 .verdict .dot.warn { background: var(--orange); box-shadow: 0 0 8px rgba(210,153,29,0.4); }
 .verdict .dot.danger { background: var(--red); box-shadow: 0 0 8px rgba(248,81,73,0.4); }
+
+/* GSAP entrance animation initial states */
+header h1, header .subtitle { visibility: hidden; }
+.control-card, .scenario-btn, .metric-card, .verdict, .chart-wrapper, .section-title { visibility: hidden; }
+.metric-card .value { display: inline-block; }
 </style>
 </head>
 <body>
@@ -461,11 +467,11 @@ function updateDisplay(r) {
   document.getElementById('valSuccess').textContent = Math.round(r.successRate * 100);
   document.getElementById('valStrategies').textContent = r.dailyStrategies;
 
-  document.getElementById('metricFee').textContent = formatUSD(r.feeRevenue);
-  document.getElementById('metricGuardian').textContent = formatUSD(r.guardianRewards);
-  document.getElementById('metricBot').textContent = formatUSD(r.botNetProfit);
-  document.getElementById('metricAttacker').textContent = formatUSD(r.challengerNet);
-  document.getElementById('metricAnnual').textContent = formatUSD(r.annualSurplus);
+  animateMetric(document.getElementById('metricFee'), r.feeRevenue);
+  animateMetric(document.getElementById('metricGuardian'), r.guardianRewards);
+  animateMetric(document.getElementById('metricBot'), r.botNetProfit);
+  animateMetric(document.getElementById('metricAttacker'), r.challengerNet);
+  animateMetric(document.getElementById('metricAnnual'), r.annualSurplus);
 
   // Verdict
   const verdictDot = document.getElementById('verdictDot');
@@ -664,8 +670,80 @@ document.querySelectorAll('.scenario-btn').forEach(btn => {
   });
 });
 
+// ---- GSAP Animations ----
+gsap.defaults({ duration: 0.6, ease: "power3.inOut" });
+
+// Entrance animation timeline
+const entranceTL = gsap.timeline({ defaults: { ease: "power3.out" } });
+
+entranceTL
+  .fromTo("header h1", { autoAlpha: 0, y: -40 }, { autoAlpha: 1, y: 0, duration: 0.8, ease: "back.out(1.4)" })
+  .fromTo("header .subtitle", { autoAlpha: 0, y: -16 }, { autoAlpha: 1, y: 0, duration: 0.5 }, "-=0.3")
+  .fromTo(".section-title", { autoAlpha: 0, x: -24 }, { autoAlpha: 1, x: 0, stagger: 0.08 }, "-=0.1")
+  .fromTo(".control-card", { autoAlpha: 0, y: 30, scale: 0.95 }, { autoAlpha: 1, y: 0, scale: 1, stagger: 0.06 }, "-=0.1")
+  .fromTo(".scenario-btn", { autoAlpha: 0, y: 12 }, { autoAlpha: 1, y: 0, stagger: 0.05 }, "-=0.2")
+  .fromTo(".verdict", { autoAlpha: 0, y: 20 }, { autoAlpha: 1, y: 0 }, "-=0.2")
+  .fromTo(".metric-card", { autoAlpha: 0, y: 40, scale: 0.92 }, { autoAlpha: 1, y: 0, scale: 1, stagger: 0.08 }, "-=0.1")
+  .fromTo(".chart-wrapper", { autoAlpha: 0, y: 30 }, { autoAlpha: 1, y: 0, stagger: 0.1 }, "-=0.2");
+
+// Verdict dot continuous pulse
+const pulseDot = gsap.to("#verdictDot", {
+  scale: 1.6,
+  autoAlpha: 0.6,
+  duration: 1.2,
+  repeat: -1,
+  yoyo: true,
+  ease: "sine.inOut",
+  paused: true
+});
+setTimeout(() => pulseDot.play(), 1800);
+
+// Card hover lift effects
+document.querySelectorAll(".control-card, .metric-card").forEach(card => {
+  card.addEventListener("mouseenter", () => {
+    gsap.to(card, { y: -4, scale: 1.02, borderColor: "var(--accent)", duration: 0.25, ease: "power2.out" });
+  });
+  card.addEventListener("mouseleave", () => {
+    gsap.to(card, { y: 0, scale: 1, borderColor: "var(--border)", duration: 0.3, ease: "power2.out" });
+  });
+});
+
+// Scenario button click ripple
+document.querySelectorAll(".scenario-btn").forEach(btn => {
+  btn.addEventListener("click", () => {
+    gsap.fromTo(btn, { scale: 0.96 }, { scale: 1, duration: 0.3, ease: "back.out(2)" });
+  });
+});
+
+// Animated metric counter
+function animateMetric(el, targetValue) {
+  const isNegative = targetValue < 0;
+  const absVal = Math.abs(targetValue);
+  const prefix = isNegative ? '-' : '';
+  let current = { val: 0 };
+
+  gsap.to(current, {
+    val: absVal,
+    duration: 0.7,
+    ease: "power2.out",
+    onUpdate: () => {
+      el.textContent = prefix + '$' + Math.round(current.val).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    },
+    onComplete: () => {
+      el.textContent = prefix + '$' + absVal.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+  });
+}
+
 // ---- Init ----
 updateDisplay(compute());
+
+// Responsive + reduced-motion support
+const mm = gsap.matchMedia();
+mm.add("(prefers-reduced-motion: reduce)", () => {
+  gsap.globalTimeline.timeScale(0);
+  return () => gsap.globalTimeline.timeScale(1);
+});
 </script>
 
 </body>

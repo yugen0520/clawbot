@@ -78,10 +78,14 @@ const IDENTITY_ADDR = process.env.AGENT_IDENTITY_ADDRESS || "";
 const REPUTATION_ADDR = process.env.REPUTATION_CALCULATOR_ADDRESS || "";
 const ARBITER_ADDR = process.env.STRATEGY_ARBITER_ADDRESS || "";
 const ECONOMIC_ADDR = process.env.ECONOMIC_MODEL_ADDRESS || "";
+const CHALLENGE_ADDR = process.env.CHALLENGE_MECHANISM_ADDRESS || "";
+const ZKP_ADDR = process.env.ZKP_VERIFIER_ADDRESS || "";
+const GUARDIAN_REG_ADDR = process.env.GUARDIAN_REGISTRY_ADDRESS || "";
+const BOT_REG_ADDR = process.env.BOT_REGISTRY_ADDRESS || "";
 
 if (BOT_TOKEN && PRIVATE_KEY && VAULT_ADDR && IDENTITY_ADDR) {
   if (proxyAgent) setEthersProxy(proxyAgent);
-  initContracts(RPC_URL, PRIVATE_KEY, VAULT_ADDR, IDENTITY_ADDR, REPUTATION_ADDR || undefined, ARBITER_ADDR || undefined, ECONOMIC_ADDR || undefined);
+  initContracts(RPC_URL, PRIVATE_KEY, VAULT_ADDR, IDENTITY_ADDR, REPUTATION_ADDR || undefined, ARBITER_ADDR || undefined, ECONOMIC_ADDR || undefined, CHALLENGE_ADDR || undefined, ZKP_ADDR || undefined, GUARDIAN_REG_ADDR || undefined, BOT_REG_ADDR || undefined);
 }
 
 const bot = proxyAgent
@@ -97,6 +101,11 @@ bot.use(async (ctx, next) => {
   const preview = msg.slice(0, 80).replace(/\n/g, " ");
   console.log(`[${ms}ms] ${preview}`);
 });
+
+// Escape Telegram Markdown special chars in dynamic content
+function mdEscape(s: string): string {
+  return s.replace(/[_*[\]()~`>#+\-=|{}.!]/g, "\\$&");
+}
 
 function hasProvider(): boolean {
   return typeof provider !== "undefined" && provider !== null;
@@ -442,7 +451,7 @@ bot.command("rate", async (ctx) => {
   try {
     const tx = await endorseOtherAgent(targetAgentId, score, reason);
     const text = await bilingual(
-      `*Endorsed Agent #${targetAgentId}*\nScore: ${score}/5\nTx: \`${tx.hash}\``,
+      `*Endorsed Agent #${targetAgentId}*\nScore: ${score}/5\nReason: ${mdEscape(reason)}\nTx: \`${tx.hash}\``,
       lang
     );
     await ctx.reply(text, { parse_mode: "Markdown" });
@@ -453,7 +462,7 @@ bot.command("rate", async (ctx) => {
 
 // ── New commands (judge feedback iteration) ──
 
-bot.command("publish", async (ctx) => {
+async function handlePublish(ctx: any) {
   const lang = getUserLang(ctx.chat?.id || 0);
   const args = ctx.message?.text?.split(" ").slice(1) || [];
   if (args.length < 4) {
@@ -475,22 +484,27 @@ bot.command("publish", async (ctx) => {
     return;
   }
 
+  const pendingMsg = await ctx.reply("Publishing intent to Mantle Sepolia...");
   try {
     const vaultAgentId = 0; // current agent
     const intentId = await publishIntent(vaultAgentId, strategyId, amountEth, apyBp, stepsJson);
     const text = await bilingual(
       `*Strategy Intent Published #${intentId}*\n` +
-      `Strategy: ${strategyId}\nAmount: ${amountEth} MNT\nAPY: ${(apyBp / 100).toFixed(1)}%\n\n` +
-      `Guardians have ~180s to challenge. After window passes, execute with /execute_intent ${intentId}.`,
+      `Strategy: ${mdEscape(strategyId)}\nAmount: ${amountEth} MNT\nAPY: ${(apyBp / 100).toFixed(1)}%\n\n` +
+      `Guardians have ~180s to challenge. After window passes, execute with /execute\\_intent ${intentId}.`,
       lang
     );
-    await ctx.reply(text, { parse_mode: "Markdown" });
+    await ctx.api.editMessageText(ctx.chat.id, pendingMsg.message_id, text, { parse_mode: "Markdown" });
+    console.log(`[PUBLISH] intentId=${intentId} strategy=${strategyId} amount=${amountEth}`);
   } catch (e: any) {
-    await replyBilingual(ctx, `Publish failed: ${e.message || "unknown"}. Ensure you have staked as Bot first (/stake bot <amount>).`);
+    await ctx.api.editMessageText(ctx.chat.id, pendingMsg.message_id, `Publish failed: ${e.message || "unknown"}. Ensure you have staked as Bot first.`);
   }
-});
+}
 
-bot.command("challenge", async (ctx) => {
+// Use hears() instead of command() — works with copy-pasted commands that lack bot_command entity
+bot.hears(/^\/publish(?:\s|$)/, handlePublish);
+
+async function handleChallenge(ctx: any) {
   const lang = getUserLang(ctx.chat?.id || 0);
   const args = ctx.message?.text?.split(" ").slice(1) || [];
   if (args.length < 2) {
@@ -510,22 +524,67 @@ bot.command("challenge", async (ctx) => {
     return;
   }
 
+  const pendingMsg = await ctx.reply("Submitting challenge to Mantle Sepolia...");
   try {
     const tx = await challengeIntent(intentId, reason, "0.001");
     const text = await bilingual(
-      `*Challenge Submitted for Intent #${intentId}*\nReason: ${reason}\nTx: \`${tx.hash}\`\n\nGuardians can now vote. Use /resolve_challenge ${intentId} <true|false> to resolve.`,
+      `*Challenge Submitted for Intent #${intentId}*\nReason: ${mdEscape(reason)}\nTx: \`${tx.hash}\`\n\nGuardians can now vote. Use /resolve\\_challenge ${intentId} \\<true\\|false\\> to resolve.`,
       lang
     );
-    await ctx.reply(text, { parse_mode: "Markdown" });
+    await ctx.api.editMessageText(ctx.chat.id, pendingMsg.message_id, text, { parse_mode: "Markdown" });
+    console.log(`[CHALLENGE] intentId=${intentId} reason="${reason.slice(0, 60)}"`);
   } catch (e: any) {
-    await replyBilingual(ctx, `Challenge failed: ${e.message || "unknown"}. Ensure you are a staked guardian and within the challenge window.`);
+    await ctx.api.editMessageText(ctx.chat.id, pendingMsg.message_id, `Challenge failed: ${e.message || "unknown"}. Ensure you are a staked guardian and within the challenge window.`);
   }
-});
+}
+
+bot.hears(/^\/challenge(?:\s|$)/, handleChallenge);
+
+async function handleResolveChallenge(ctx: any) {
+  const lang = getUserLang(ctx.chat?.id || 0);
+  const args = ctx.message?.text?.split(" ").slice(1) || [];
+  if (args.length < 2) {
+    await replyBilingual(ctx,
+      "Usage: `/resolve_challenge <intentId> <true|false>`\n" +
+      "Example: `/resolve_challenge 3 true` (uphold challenge, slash bot)\n" +
+      "Must be a staked guardian.",
+      { parse_mode: "Markdown" }
+    );
+    return;
+  }
+  const intentId = parseInt(args[0], 10);
+  const uphold = args[1].toLowerCase() === "true";
+
+  if (isNaN(intentId)) {
+    await replyBilingual(ctx, "Invalid intent ID.");
+    return;
+  }
+
+  const pendingMsg = await ctx.reply("Submitting resolution to Mantle Sepolia...");
+  try {
+    const tx = await resolveArbiterChallenge(intentId, uphold);
+    const text = await bilingual(
+      `*Challenge Resolved for Intent #${intentId}*\nOutcome: ${uphold ? "UPHELD (bot slashed)" : "REJECTED (challenge failed)"}\nTx: \`${tx.hash}\``,
+      lang
+    );
+    await ctx.api.editMessageText(ctx.chat.id, pendingMsg.message_id, text, { parse_mode: "Markdown" });
+    console.log(`[RESOLVE] intentId=${intentId} uphold=${uphold}`);
+  } catch (e: any) {
+    await ctx.api.editMessageText(ctx.chat.id, pendingMsg.message_id, `Resolution failed: ${e.message || "unknown"}`);
+  }
+}
+
+bot.hears(/^\/resolve_challenge(?:\s|$)/, handleResolveChallenge);
 
 bot.command("reputation", async (ctx) => {
   const lang = getUserLang(ctx.chat?.id || 0);
   const args = ctx.message?.text?.split(" ").slice(1) || [];
   const agentId = args[0] ? parseInt(args[0], 10) : 0;
+
+  if (!hasProvider()) {
+    await replyBilingual(ctx, "RPC not connected. Check PRIVATE_KEY and MANTLE_RPC_URL in .env.");
+    return;
+  }
 
   try {
     const agent = await getAgentInfo(agentId);
@@ -570,6 +629,7 @@ bot.command("stake", async (ctx) => {
   const role = args[0].toLowerCase();
   const amount = args[1];
 
+  const pendingMsg = await ctx.reply("Submitting stake to Mantle Sepolia...");
   try {
     let tx;
     switch (role) {
@@ -578,16 +638,16 @@ bot.command("stake", async (ctx) => {
       case "submitter": tx = await stakeAsSubmitter(amount); break;
       case "guardian_r": tx = await stakeAsGuardianReputation(amount); break;
       default:
-        await replyBilingual(ctx, `Unknown role: ${role}. Use bot, guardian_a, submitter, or guardian_r.`);
+        await ctx.api.editMessageText(ctx.chat.id, pendingMsg.message_id, `Unknown role: ${role}`);
         return;
     }
     const text = await bilingual(
       `*Staked ${amount} MNT as ${role}*\nTx: \`${tx.hash}\``,
       lang
     );
-    await ctx.reply(text, { parse_mode: "Markdown" });
+    await ctx.api.editMessageText(ctx.chat.id, pendingMsg.message_id, text, { parse_mode: "Markdown" });
   } catch (e: any) {
-    await replyBilingual(ctx, `Staking failed: ${e.message || "unknown"}`);
+    await ctx.api.editMessageText(ctx.chat.id, pendingMsg.message_id, `Staking failed: ${e.message || "unknown"}`);
   }
 });
 
@@ -620,38 +680,6 @@ bot.command("guardians", async (ctx) => {
   }
 });
 
-bot.command("resolve_challenge", async (ctx) => {
-  const lang = getUserLang(ctx.chat?.id || 0);
-  const args = ctx.message?.text?.split(" ").slice(1) || [];
-  if (args.length < 2) {
-    await replyBilingual(ctx,
-      "Usage: `/resolve_challenge <intentId> <true|false>`\n" +
-      "Example: `/resolve_challenge 3 true` (uphold challenge, slash bot)\n" +
-      "Must be a staked guardian.",
-      { parse_mode: "Markdown" }
-    );
-    return;
-  }
-  const intentId = parseInt(args[0], 10);
-  const uphold = args[1].toLowerCase() === "true";
-
-  if (isNaN(intentId)) {
-    await replyBilingual(ctx, "Invalid intent ID.");
-    return;
-  }
-
-  try {
-    const tx = await resolveArbiterChallenge(intentId, uphold);
-    const text = await bilingual(
-      `*Challenge Resolved for Intent #${intentId}*\nOutcome: ${uphold ? "UPHELD (bot slashed)" : "REJECTED (challenge failed)"}\nTx: \`${tx.hash}\``,
-      lang
-    );
-    await ctx.reply(text, { parse_mode: "Markdown" });
-  } catch (e: any) {
-    await replyBilingual(ctx, `Resolution failed: ${e.message || "unknown"}`);
-  }
-});
-
 // ── Main handler ──
 
 bot.on("message:text", async (ctx) => {
@@ -660,6 +688,7 @@ bot.on("message:text", async (ctx) => {
   // Detect and store user language
   const userLang = detectLanguageName(msg);
   setUserLang(ctx.chat.id, userLang);
+  console.log(`[MSG] chat=${ctx.chat.id} lang=${userLang} text="${msg.slice(0, 80)}"`);
 
   // Quick check: bare wallet address
   const bareAddrMatch = msg.match(/^(0x[a-fA-F0-9]{40})$/);
@@ -873,7 +902,8 @@ bot.on("message:text", async (ctx) => {
     case "publish_intent": {
       const amount = intent.amount || 0;
       const strategy = intent.strategy || "AGNI_USDC";
-      const apyBp = 850; // default
+      const pool = getAllPools().find(p => p.strategyId === strategy || p.name.includes(strategy));
+      const apyBp = pool ? pool.apy : 850;
       if (amount <= 0) {
         await ctx.reply(response + "\n\nPlease specify an amount. Example: \"publish 5 MNT to Agni\"", { parse_mode: "Markdown" });
         return;
@@ -882,7 +912,7 @@ bot.on("message:text", async (ctx) => {
         const stepsJson = JSON.stringify([{ action: "deposit", protocol: strategy, amount: `${amount} MNT`, expectedAPY: `${(apyBp / 100).toFixed(1)}%` }]);
         const intentId = await publishIntent(0, strategy, String(amount), apyBp, stepsJson);
         const dataText = await bilingual(
-          `*Intent Published #${intentId}*\nStrategy: ${strategy}\nAmount: ${amount} MNT\nAPY: ${(apyBp / 100).toFixed(1)}%\n\nGuardians have ~180s to challenge.`,
+          `*Intent Published #${intentId}*\nStrategy: ${mdEscape(strategy)}\nAmount: ${amount} MNT\nAPY: ${(apyBp / 100).toFixed(1)}%\n\nGuardians have ~180s to challenge.`,
           userLang
         );
         await ctx.reply(`${response}\n\n${dataText}`, { parse_mode: "Markdown" });
@@ -947,12 +977,28 @@ bot.on("message:text", async (ctx) => {
       break;
     }
   }
+  console.log(`[REPLY] intent=${intent.action} resp="${response.slice(0, 100)}"`);
 });
 
 if (BOT_TOKEN) {
-  bot.start({
-    onStart: () => console.log("ClawBot is running..."),
-  });
+  async function startBot() {
+    while (true) {
+      try {
+        await bot.start({
+          onStart: () => console.log("ClawBot is running..."),
+        });
+      } catch (e: any) {
+        if (e?.error_code === 409) {
+          console.log("409 conflict, waiting 35s for old poll to expire...");
+          await new Promise(r => setTimeout(r, 35000));
+          continue;
+        }
+        console.error("Bot fatal error:", e?.message || e);
+        process.exit(1);
+      }
+    }
+  }
+  startBot();
 } else {
   console.log("TELEGRAM_BOT_TOKEN not set. Bot is not running.");
 }

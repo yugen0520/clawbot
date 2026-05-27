@@ -70,6 +70,7 @@ const REPUTATION_ABI = [
   "function resultCount() external view returns (uint256)",
   "function guardianStakes(address) external view returns (uint256)",
   "function submitterStakes(address) external view returns (uint256)",
+  "event StrategyResultSubmitted(uint256 indexed resultId, uint256 indexed agentId, bytes32 strategyId, uint256 apyBasisPoints, uint256 stake, address submitter)",
 ];
 
 const ARBITER_ABI = [
@@ -91,6 +92,7 @@ const ARBITER_ABI = [
   "function minBotStake() external view returns (uint256)",
   "function minGuardianStake() external view returns (uint256)",
   "function defaultChallengeWindow() external view returns (uint256)",
+  "event IntentPublished(uint256 indexed intentId, uint256 indexed agentId, address indexed vault, bytes32 strategyId, uint256 amount, uint256 publishedAt)",
 ];
 
 const ECONOMIC_ABI = [
@@ -101,6 +103,48 @@ const ECONOMIC_ABI = [
   "function totalFeesCollected() external view returns (uint256)",
 ];
 
+const GUARDIAN_REGISTRY_ABI = [
+  "function register() external payable",
+  "function addStake() external payable",
+  "function withdrawStake(uint256 amount) external",
+  "function deregister() external",
+  "function slash(address guardian, uint256 amount, string calldata reason) external",
+  "function recordParticipation(address guardian, uint256 challengeId) external",
+  "function recordVote(address guardian, uint256 challengeId) external",
+  "function addRewards(address guardian, uint256 amount) external",
+  "function claimRewards() external",
+  "function setMinStake(uint256 _minStake) external",
+  "function setAuthorizedCaller(address caller, bool authorized) external",
+  "function getGuardian(address addr) external view returns (tuple(address guardian, uint256 stake, uint256 joinedAt, uint256 slashCount, uint256 challengesParticipated, uint256 votesCast, bool active))",
+  "function isGuardian(address addr) external view returns (bool)",
+  "function getAllGuardians() external view returns (tuple(address guardian, uint256 stake, uint256 joinedAt, uint256 slashCount, uint256 challengesParticipated, uint256 votesCast, bool active)[])",
+  "function getGuardianCount() external view returns (uint256)",
+  "function pendingRewards(address) external view returns (uint256)",
+  "function minStake() external view returns (uint256)",
+];
+
+const BOT_REGISTRY_ABI = [
+  "function register(uint256 agentId) external payable",
+  "function addStake() external payable",
+  "function withdrawStake(uint256 amount) external",
+  "function deregister() external",
+  "function slash(address bot, uint256 amount, string calldata reason) external",
+  "function recordStrategyPublished(address bot, uint256 intentId) external",
+  "function recordStrategyExecuted(address bot, uint256 intentId, uint256 volume) external",
+  "function recordChallengeSurvived(address bot) external",
+  "function addRewards(address bot, uint256 amount) external",
+  "function claimRewards() external",
+  "function setMinStake(uint256 _minStake) external",
+  "function setAuthorizedCaller(address caller, bool authorized) external",
+  "function getBot(address addr) external view returns (tuple(address bot, uint256 agentId, uint256 stake, uint256 joinedAt, uint256 slashCount, uint256 strategiesPublished, uint256 strategiesExecuted, uint256 challengesSurvived, uint256 challengesLost, uint256 totalVolumeExecuted, bool active))",
+  "function isBot(address addr) external view returns (bool)",
+  "function getAllBots() external view returns (tuple(address bot, uint256 agentId, uint256 stake, uint256 joinedAt, uint256 slashCount, uint256 strategiesPublished, uint256 strategiesExecuted, uint256 challengesSurvived, uint256 challengesLost, uint256 totalVolumeExecuted, bool active)[])",
+  "function getBotCount() external view returns (uint256)",
+  "function getTopBots(uint256 n) external view returns (address[] addrs, uint256[] volumes)",
+  "function pendingRewards(address) external view returns (uint256)",
+  "function minStake() external view returns (uint256)",
+];
+
 let provider: ethers.JsonRpcProvider;
 let signer: ethers.Wallet;
 let vaultContract: ethers.Contract;
@@ -108,6 +152,8 @@ let identityContract: ethers.Contract;
 let reputationContract: ethers.Contract | null = null;
 let arbiterContract: ethers.Contract | null = null;
 let economicContract: ethers.Contract | null = null;
+let guardianRegistryContract: ethers.Contract | null = null;
+let botRegistryContract: ethers.Contract | null = null;
 
 export function initContracts(
   rpcUrl: string,
@@ -116,7 +162,11 @@ export function initContracts(
   identityAddress: string,
   reputationAddress?: string,
   arbiterAddress?: string,
-  economicAddress?: string
+  economicAddress?: string,
+  challengeAddress?: string,
+  zkpAddress?: string,
+  guardianRegistryAddress?: string,
+  botRegistryAddress?: string
 ) {
   provider = new ethers.JsonRpcProvider(rpcUrl);
   signer = new ethers.Wallet(privateKey, provider);
@@ -130,6 +180,12 @@ export function initContracts(
   }
   if (economicAddress) {
     economicContract = new ethers.Contract(economicAddress, ECONOMIC_ABI, signer);
+  }
+  if (guardianRegistryAddress) {
+    guardianRegistryContract = new ethers.Contract(guardianRegistryAddress, GUARDIAN_REGISTRY_ABI, signer);
+  }
+  if (botRegistryAddress) {
+    botRegistryContract = new ethers.Contract(botRegistryAddress, BOT_REGISTRY_ABI, signer);
   }
 }
 
@@ -262,7 +318,7 @@ export async function endorseOtherAgent(
   reason: string
 ) {
   const tx = await vaultContract.endorseOtherAgent(targetAgentId, score, reason);
-  return tx.wait();
+  return tx; // fire-and-forget
 }
 
 export async function getEndorsement(targetAgentId: number, raterAgentId: number) {
@@ -279,13 +335,13 @@ export async function getArbiter() {
 export async function stakeAsBot(amountEth: string) {
   if (!arbiterContract) throw new Error("Arbiter not configured");
   const tx = await arbiterContract.stakeAsBot({ value: ethers.parseEther(amountEth) });
-  return tx.wait();
+  return tx; // fire-and-forget: return TX immediately, don't wait for confirmation
 }
 
 export async function stakeAsGuardianArbiter(amountEth: string) {
   if (!arbiterContract) throw new Error("Arbiter not configured");
   const tx = await arbiterContract.stakeAsGuardian({ value: ethers.parseEther(amountEth) });
-  return tx.wait();
+  return tx; // fire-and-forget
 }
 
 export async function publishIntent(
@@ -294,15 +350,14 @@ export async function publishIntent(
   if (!arbiterContract) throw new Error("Arbiter not configured");
   if (!vaultContract) throw new Error("Vault not configured");
   const vaultAddr = await vaultContract.getAddress();
-  const tx = await arbiterContract.publishIntent(
+  // Predict intentId BEFORE sending TX (fire-and-forget — no wait for confirmation)
+  const count = await arbiterContract.intentCount();
+  const predictedId = Number(count);
+  await arbiterContract.publishIntent(
     agentId, vaultAddr, ethers.encodeBytes32String(strategyId),
     ethers.parseEther(amountEth), apyBp, stepsJson
   );
-  const receipt = await tx.wait();
-  const event = receipt.logs.find((l: any) => {
-    try { return arbiterContract!.interface.parseLog(l)?.name === "IntentPublished"; } catch { return false; }
-  });
-  return event ? Number(arbiterContract!.interface.parseLog(event)!.args.intentId) : 0;
+  return predictedId;
 }
 
 export async function challengeIntent(intentId: number, reason: string, feeEth: string) {
@@ -310,13 +365,13 @@ export async function challengeIntent(intentId: number, reason: string, feeEth: 
   const tx = await arbiterContract.challengeIntent(intentId, reason, {
     value: ethers.parseEther(feeEth),
   });
-  return tx.wait();
+  return tx; // fire-and-forget
 }
 
 export async function resolveArbiterChallenge(intentId: number, uphold: boolean) {
   if (!arbiterContract) throw new Error("Arbiter not configured");
   const tx = await arbiterContract.resolveChallenge(intentId, uphold);
-  return tx.wait();
+  return tx; // fire-and-forget
 }
 
 export async function canExecute(intentId: number): Promise<{ ok: boolean; reason: string }> {
@@ -372,13 +427,13 @@ export async function getReputation() {
 export async function stakeAsSubmitter(amountEth: string) {
   if (!reputationContract) throw new Error("Reputation calculator not configured");
   const tx = await reputationContract.stakeAsSubmitter({ value: ethers.parseEther(amountEth) });
-  return tx.wait();
+  return tx; // fire-and-forget
 }
 
 export async function stakeAsGuardianReputation(amountEth: string) {
   if (!reputationContract) throw new Error("Reputation calculator not configured");
   const tx = await reputationContract.stakeAsGuardian({ value: ethers.parseEther(amountEth) });
-  return tx.wait();
+  return tx; // fire-and-forget
 }
 
 export async function submitStrategyResult(
@@ -387,14 +442,12 @@ export async function submitStrategyResult(
 ): Promise<number> {
   if (!reputationContract) throw new Error("Reputation calculator not configured");
   const strategyId = ethers.encodeBytes32String(strategyName);
-  const tx = await reputationContract.submitStrategyResult(
+  const count = await reputationContract.resultCount();
+  const predictedId = Number(count);
+  await reputationContract.submitStrategyResult(
     agentId, strategyId, apyBp, ethers.parseEther(amountEth), execTs, expectedTs, reason
   );
-  const receipt = await tx.wait();
-  const event = receipt.logs.find((l: any) => {
-    try { return reputationContract!.interface.parseLog(l)?.name === "StrategyResultSubmitted"; } catch { return false; }
-  });
-  return event ? Number(reputationContract!.interface.parseLog(event)!.args.resultId) : 0;
+  return predictedId;
 }
 
 export async function challengeResult(resultId: number) {
@@ -478,4 +531,77 @@ export async function getTotalFeesCollected(): Promise<string> {
   return ethers.formatEther(await economicContract.totalFeesCollected());
 }
 
-export { provider, signer, vaultContract, identityContract };
+export { provider, signer, vaultContract, identityContract, guardianRegistryContract, botRegistryContract };
+
+// ── Guardian Registry ──
+
+export async function getGuardianRegistry() {
+  if (!guardianRegistryContract) throw new Error("GuardianRegistry not configured");
+  return guardianRegistryContract;
+}
+
+export async function registerAsGuardian(amountEth: string) {
+  if (!guardianRegistryContract) throw new Error("GuardianRegistry not configured");
+  const tx = await guardianRegistryContract.register({ value: ethers.parseEther(amountEth) });
+  return tx.wait();
+}
+
+export async function getGuardianInfo(address: string) {
+  if (!guardianRegistryContract) throw new Error("GuardianRegistry not configured");
+  const g = await guardianRegistryContract.getGuardian(address);
+  return {
+    guardian: g.guardian,
+    stake: ethers.formatEther(g.stake),
+    joinedAt: Number(g.joinedAt),
+    slashCount: Number(g.slashCount),
+    challengesParticipated: Number(g.challengesParticipated),
+    votesCast: Number(g.votesCast),
+    active: g.active,
+  };
+}
+
+export async function getGuardianCount(): Promise<number> {
+  if (!guardianRegistryContract) return 0;
+  return Number(await guardianRegistryContract.getGuardianCount());
+}
+
+// ── Bot Registry ──
+
+export async function getBotRegistry() {
+  if (!botRegistryContract) throw new Error("BotRegistry not configured");
+  return botRegistryContract;
+}
+
+export async function registerBot(agentId: number, amountEth: string) {
+  if (!botRegistryContract) throw new Error("BotRegistry not configured");
+  const tx = await botRegistryContract.register(agentId, { value: ethers.parseEther(amountEth) });
+  return tx.wait();
+}
+
+export async function getBotInfo_Registry(address: string) {
+  if (!botRegistryContract) throw new Error("BotRegistry not configured");
+  const b = await botRegistryContract.getBot(address);
+  return {
+    bot: b.bot,
+    agentId: Number(b.agentId),
+    stake: ethers.formatEther(b.stake),
+    joinedAt: Number(b.joinedAt),
+    slashCount: Number(b.slashCount),
+    strategiesPublished: Number(b.strategiesPublished),
+    strategiesExecuted: Number(b.strategiesExecuted),
+    challengesSurvived: Number(b.challengesSurvived),
+    challengesLost: Number(b.challengesLost),
+    totalVolumeExecuted: ethers.formatEther(b.totalVolumeExecuted),
+    active: b.active,
+  };
+}
+
+export async function getBotCount(): Promise<number> {
+  if (!botRegistryContract) return 0;
+  return Number(await botRegistryContract.getBotCount());
+}
+
+export async function getTopBots(n: number) {
+  if (!botRegistryContract) return { addrs: [], volumes: [] };
+  return botRegistryContract.getTopBots(n);
+}
