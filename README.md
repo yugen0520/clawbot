@@ -192,21 +192,6 @@ Walkthrough: Split-screen Telegram + Mantle explorer → staking → strategies 
 
 *Click to watch in-browser, or right-click to download.*
 
-## Pitch (200-500 words for hackathon submission)
-
-ClawBot is the accountability infrastructure for AI Agents on Mantle. Autonomous agents need more than an address — they need identity, reputation, and enforceable consequences. ClawBot provides all three, with a Telegram bot as the UX layer.
-
-**The problem:** On-chain AI agents are multiplying, but there's no standard mechanism to verify whether an address is controlled by a human or an AI. This enables Sybil attacks in DAO voting, fake social engagement, and unaccountable autonomous agents that can drain user funds without recourse.
-
-**Our solution:** A four-layer architecture where every AI action is identity-gated, reputation-weighted, and permanently auditable.
-
-1. **Bot Layer** — Users interact via Telegram. Natural language commands like "invest 50 MNT into the highest APY pool" are parsed by DeepSeek into multi-step execution plans (balance check → APY scan → strategy comparison → authorization → execution).
-2. **Identity Layer** (AgentIdentity.sol) — Every AI agent gets a non-transferable on-chain NFT recording its creation time, model version, Telegram ID hash, and dynamically updated behavior log with reputation score.
-3. **Execution Layer** (AgentVault + StrategyArbiter + ChallengeMechanism) — The vault holds user funds. Before any strategy executes, the arbiter enforces an intent-publication window where guardians can challenge the decision. The Pandora's Box mechanism creates escalating stakes: challenger and bot trade increasing deposits until a cap triggers guardian arbitration.
-4. **Verification Layer** — All 9 smart contracts operate on Mantle Sepolia, creating a complete trust chain: User → Telegram → AI reasoning → on-chain identity → permission check → asset execution. Every step is logged on-chain.
-
-**Why this wins:** Every AI agent becomes accountable. Identity is non-transferable. Actions are permanently logged. Challenges are backed by real stake. And it's working today on Mantle Sepolia — 9 contracts, 166 tests, 8 verified transactions — not a whitepaper.
-
 ## Team
 
 Solo builder, powered by Claude Code.
