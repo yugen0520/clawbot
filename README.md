@@ -1,201 +1,541 @@
 # ClawBot
 
-ClawBot is the accountability infrastructure for AI Agents on Mantle. Every autonomous agent gets a verifiable on-chain identity, a cryptographically enforced reputation, and real economic skin in the game — backed by guardians, challenge mechanisms, and slashing conditions.
+**The accountability and trust infrastructure for AI Agents on Mantle.**
+
+AI agents are rapidly moving on-chain — managing assets, executing strategies, and interacting autonomously with protocols.
+
+But today, most agents are still just **anonymous wallet addresses**:
+
+❌ No identity
+❌ No reputation
+❌ No accountability
+
+ClawBot transforms AI agents into **verifiable on-chain entities** with:
+
+✅ **Verifiable Identity**
+✅ **Economic Accountability**
+✅ **Reputation at Stake**
+
+Instead of asking users to blindly trust AI:
+
+> **ClawBot makes trust verifiable.**
+
+---
 
 > **Mantle Turing Test Hackathon 2026 · Agentic Economy Track**
 >
-> Not an AI wallet. Not a DeFi assistant. Infrastructure that answers: which agents can be trusted, and what's at stake if they break that trust.
+> Not an AI wallet. Not a DeFi assistant.
+>
+> **ClawBot is the trust layer for autonomous AI agents.**
+
+---
+
+## Live Status
+
+✅ **9 deployed smart contracts on Mantle Sepolia**
+✅ **166/166 tests passing**
+✅ **Zero compilation warnings**
+✅ **Telegram AI Agent interface**
+✅ **DeepSeek-powered multi-step reasoning**
+✅ **Economic challenge + slashing mechanisms**
+✅ **Fully open-source**
+
+---
+
+## Architecture Overview
+
+```text
+┌──────────────────────────────────────┐
+│ User Layer                           │
+│ Telegram Natural Language Interface  │
+└──────────────────────────────────────┘
+                    │
+                    ▼
+┌──────────────────────────────────────┐
+│ AI Reasoning Layer                   │
+│ DeepSeek Multi-step Reasoning        │
+│ Intent Parsing & Strategy Planning   │
+└──────────────────────────────────────┘
+                    │
+                    ▼
+┌──────────────────────────────────────┐
+│ Accountability Layer (Core Innovation)│
+│ AgentIdentity                        │
+│ ReputationCalculator                 │
+│ StrategyArbiter                      │
+│ ChallengeMechanism                   │
+│ EconomicModel                        │
+└──────────────────────────────────────┘
+                    │
+                    ▼
+┌──────────────────────────────────────┐
+│ Execution Layer                      │
+│ AgentVault                           │
+│ Verified On-chain Execution          │
+└──────────────────────────────────────┘
+```
+
+**Core Flow**
+
+```text
+User Message
+      ↓
+DeepSeek Multi-step Reasoning
+      ↓
+Strategy Intent Published On-chain
+      ↓
+Mandatory Challenge Window (180s)
+      ↓
+Guardian Verification
+      ↓
+Strategy Execution on Mantle
+      ↓
+Reputation Update
+```
+
+---
 
 ## Why This Exists
 
-AI Agents are flooding on-chain — trading, voting, managing assets. But right now they're just bare addresses. No identity. No reputation. No way to hold them accountable when they misbehave. An agent that drains a vault and an agent that's been running honestly for six months look identical on-chain.
+AI agents are becoming powerful economic actors on-chain.
 
-ClawBot fixes this. It's a complete on-chain infrastructure layer that wraps every AI Agent in three primitives:
+They manage funds, vote in governance, allocate liquidity, and execute autonomous strategies.
 
-- **Verifiable Identity** — Each agent gets a non-transferable NFT (AgentIdentity) with its creation time, model version, and a permanent, append-only behavior log. You know who deployed it, when, and what it's done since.
-- **Economic Accountability** — Before executing any strategy, agents publish their intent on-chain and stake real capital. Guardians can challenge decisions they disagree with. Losers get slashed. The Pandora's Box mechanism escalates stakes until arbitration resolves the dispute.
-- **Reputation at Stake** — Every action — executed, challenged, won, lost — updates the agent's reputation score. Agents with low scores lose access. Agents with high scores earn trust. Reputation isn't just cosmetic; it gates execution.
+Yet today:
 
-The Telegram bot and dashboard are the UX layer. The 9 smart contracts on Mantle Sepolia are the infrastructure.
+> **An honest AI agent and a malicious one look identical on-chain.**
 
-## Architecture
+They're just wallet addresses.
 
-```
-User (Telegram)
-    |  "invest 50 MNT into highest APY pool"
-    v
-+-----------------------------------------+
-|  ClawBot (grammY + DeepSeek API)        |
-|  +-----------+  +----------------+      |
-|  | NLU       |  | DeFi Scanner   |      |
-|  | Parser    |  | (Mantle RPC)   |      |
-|  +-----+-----+  +-------+--------+      |
-|        |  ParsedIntent  | APY Data      |
-|        +--------+-------+               |
-|                 v                       |
-|          Strategy Selector              |
-+------------------+----------------------+
-                   | ethers.js tx
-                   v
-+-----------------------------------------+
-|  Mantle Network (Sepolia Testnet)        |
-|  +----------------+  +----------------+  |
-|  | AgentVault     |  | AgentIdentity  |  |
-|  | · deposit()    |  | · createAgent  |  |
-|  | · executeStr   |  | · logAction    |  |
-|  | · withdraw()   |  | · getActions   |  |
-|  +----------------+  +----------------+  |
-+-----------------------------------------+
-                   |
-                   v
-+-----------------------------------------+
-|  Dashboard (Next.js · Static Export)    |
-|  · Vault TVL & Weighted APY             |
-|  · Strategy comparison cards            |
-|  · Agent on-chain action feed           |
-+-----------------------------------------+
-```
+This creates four major problems:
 
-## Smart Contracts (9/9 deployed on Mantle Sepolia)
+### 1. Sybil Attacks
 
-### Identity & Reputation
-| 合约 | 用途 |
-|------|------|
-| `AgentIdentity` | AI Agent 链上身份 NFT，不可转让。记录行为日志、动态信誉评分、Agent 间背书 |
-| `ReputationCalculator` | 去中心化信誉算法：APY 表现、执行时效、时间衰减。Bot 提交数据、守护者投票仲裁 |
+One operator can deploy dozens of AI agents to manipulate:
 
-### Execution & Security
-| 合约 | 用途 |
-|------|------|
-| `AgentVault` | AI 管理收益金库。身份门控执行策略，支持意图发布 + 挑战窗口流程 |
-| `StrategyArbiter` | 策略意图发布、Bot 质押、守护者挑战。执行前强制挑战窗口 |
-| `ChallengeMechanism` | Pandora's Box 多轮递增挑战博弈。挑战者与 Bot 轮流加注，上限后守护者仲裁 |
-| `ZKPVerifier` | Commit-Reveal 验证器，Binding Bot 到具体执行参数，执行后揭示并验证 |
+* DAO governance
+* Reputation systems
+* Airdrops
+* Liquidity incentives
 
-### Registries & Economics
-| 合约 | 用途 |
-|------|------|
-| `GuardianRegistry` | 去中心化守护者身份注册与质押。守护者参与挑战投票和仲裁 |
-| `BotRegistry` | 去中心化 Bot 身份注册与质押。Bot 发布策略、执行交易、获取激励 |
-| `EconomicModel` | 协议收费模型：注册费 + 查询费 + 匹配费 → 国库/守护者/Agent 三方分配 |
+### 2. Black Box Execution
 
-> 完整部署地址见 [DEPLOYED_ADDRESSES.md](./DEPLOYED_ADDRESSES.md)
+Users have no way to verify:
 
-## Project Structure
+* Why an agent made a decision
+* Whether execution was manipulated
+* If a strategy was front-run or altered
 
-```
-clawbot/
-├── contracts/              # Solidity (Hardhat)
-│   ├── contracts/
-│   │   ├── AgentIdentity.sol
-│   │   ├── AgentVault.sol
-│   │   ├── StrategyArbiter.sol
-│   │   ├── ChallengeMechanism.sol
-│   │   ├── ReputationCalculator.sol
-│   │   ├── EconomicModel.sol
-│   │   ├── GuardianRegistry.sol
-│   │   ├── BotRegistry.sol
-│   │   └── ZKPVerifier.sol
-│   ├── scripts/deploy_all.ts
-│   └── test/   (166/166 passing)
-├── bot/                    # Telegram Bot (Node.js)
-│   └── src/
-│       ├── index.ts        # Bot entry, message routing
-│       ├── ai-nlu.ts       # DeepSeek intent parser
-│       ├── defi-queries.ts # Mantle pool APY data
-│       └── contract.ts     # ethers.js on-chain interaction
-└── frontend/               # Dashboard (Next.js 14)
-    └── src/
-        ├── app/page.tsx    # Main dashboard
-        └── lib/contracts.ts # Read-only chain queries
-```
+### 3. Zero Accountability
 
-## Quick Start
+Malicious agents can:
 
-**Prerequisites:** Node.js 18+, Mantle Sepolia wallet with testnet MNT, Telegram Bot Token, DeepSeek API Key
+1. Drain funds
+2. Abandon identity
+3. Restart from a fresh wallet
 
-### 1. Deploy Contracts
+with no reputational cost.
 
-```bash
-cd contracts
-cp .env.example .env   # Add PRIVATE_KEY
-npm install
-npx hardhat compile
-npx hardhat test        # 166/166 passing
-npx hardhat run scripts/deploy_all.ts --network mantleSepolia  # 部署全部 9 个合约
-```
+### 4. No Trust Standard
 
-Note the deployed AgentIdentity and AgentVault addresses for the next steps.
+There is currently **no trust layer for autonomous AI agents.**
 
-### 2. Run Bot
+ClawBot solves this problem by introducing:
 
-```bash
-cd bot
-cp .env.example .env   # Add TELEGRAM_BOT_TOKEN, DEEPSEEK_API_KEY, PRIVATE_KEY, contract addresses
-npm install
-npm run dev
-```
+### Verifiable Identity
 
-### 3. Build Dashboard
+Every agent receives a **non-transferable on-chain identity**.
 
-```bash
-cd frontend
-npm install
-cp .env.example .env   # Add NEXT_PUBLIC_VAULT_ADDRESS, NEXT_PUBLIC_IDENTITY_ADDRESS
-npm run dev             # http://localhost:3000
-npm run build           # Static export → out/
-```
+### Economic Accountability
+
+Suspicious behavior can be challenged and economically penalized.
+
+### Reputation at Stake
+
+Agents accumulate persistent credibility based on transparent execution history.
+
+---
+
+## Why ClawBot Wins
+
+### 1. On-chain Accountability for AI Agents
+
+ClawBot is not another AI wallet assistant.
+
+It introduces:
+
+**Identity + Reputation + Arbitration + Economic Penalties**
+
+for autonomous AI.
+
+This transforms agents from:
+
+> anonymous wallets
+
+into:
+
+> accountable economic actors.
+
+### 2. Economic Challenge + Slashing Mechanism
+
+Before execution:
+
+1. Strategy intent is published on-chain
+2. Mandatory challenge window opens
+3. Guardians may dispute malicious strategies
+4. Pandora's Box escalation game begins
+5. Losing side gets slashed
+
+This creates:
+
+> **economic consequences for bad AI behavior**
+
+### 3. End-to-End Working System
+
+Fully deployed on **Mantle Sepolia**
+
+Production-grade implementation:
+
+* **9 smart contracts**
+* **166/166 tests passing**
+* **Telegram bot integration**
+* **DeepSeek reasoning**
+* **Real execution pipeline**
+* **Zero compilation warnings**
+
+### 4. Natural Language UX
+
+Users interact naturally through Telegram.
+
+Example:
+
+> “Invest 50 MNT into the highest APY pool.”
+
+ClawBot:
+
+1. Understands intent using DeepSeek
+2. Analyzes Mantle protocols
+3. Publishes strategy intent on-chain
+4. Verifies identity & reputation
+5. Waits through challenge window
+6. Executes securely
+## Smart Contract Architecture
+
+ClawBot consists of **9 core smart contracts** deployed on Mantle Sepolia.
+
+| Contract                   | Role                                   |
+| -------------------------- | -------------------------------------- |
+| `AgentIdentity.sol`        | Non-transferable AI Agent identity NFT |
+| `AgentVault.sol`           | Identity-gated asset custody           |
+| `StrategyArbiter.sol`      | Intent publication + challenge window  |
+| `ChallengeMechanism.sol`   | Pandora's Box dispute escalation       |
+| `ReputationCalculator.sol` | Reputation scoring & decay             |
+| `GuardianRegistry.sol`     | Guardian staking & participation       |
+| `BotRegistry.sol`          | Bot registration & staking             |
+| `EconomicModel.sol`        | Protocol fee routing & incentives      |
+| `ZKPVerifier.sol`          | Future verifiable execution layer      |
+
+---
+
+## How It Works
+
+### Step 1 — User Intent
+
+Users interact naturally through Telegram.
+
+Example:
+
+> “Invest 50 MNT into the highest APY pool.”
+
+ClawBot parses intent using **DeepSeek multi-step reasoning**.
+
+Tasks may include:
+
+* Wallet balance checks
+* Yield scanning
+* APY comparison
+* Risk evaluation
+* Transaction preparation
+* Execution planning
+
+---
+
+### Step 2 — Agent Identity Verification
+
+Before execution:
+
+`AgentIdentity.sol`
+
+checks:
+
+* Agent exists
+* Identity is active
+* Reputation threshold is met
+* Telegram identity hash matches
+
+Every action is tied to a persistent on-chain identity.
+
+---
+
+### Step 3 — Strategy Intent Publication
+
+Before execution:
+
+`StrategyArbiter.sol`
+
+forces strategy publication on-chain.
+
+Intent includes:
+
+* Protocol target
+* Strategy type
+* Execution amount
+* Metadata hash
+
+A **mandatory challenge window (180s)** begins.
+
+---
+
+### Step 4 — Guardian Challenge
+
+Guardians may challenge suspicious strategies.
+
+Challenge process:
+
+1. Guardian stakes MNT
+2. Bot counter-stakes
+3. Stakes escalate across rounds
+4. Arbitration resolves dispute
+5. Losing side gets slashed
+
+This makes malicious behavior:
+
+> **economically irrational**
+
+---
+
+### Step 5 — Verified Execution
+
+If challenge window passes:
+
+`AgentVault.sol`
+
+executes the approved strategy on Mantle.
+
+Execution logs are permanently recorded.
+
+---
+
+### Step 6 — Reputation Update
+
+`ReputationCalculator.sol`
+
+updates reputation based on:
+
+* Strategy performance
+* APY benchmarks
+* Timeliness
+* Time decay
+* Historical reliability
+
+This creates:
+
+> **persistent, earned trust**
+
+---
+
+## Economic Security
+
+ClawBot uses **economic incentives instead of blind trust**.
+
+Security assumptions:
+
+### Guardian Challenges
+
+Suspicious actions can be challenged.
+
+Bad actors risk:
+
+* Slashing
+* Reputation damage
+* Economic loss
+
+### Pandora's Box Escalation Game
+
+Disputes use an escalating stake mechanism.
+
+Each round increases commitment.
+
+Result:
+
+> spam attacks become expensive.
+
+### Reputation Decay
+
+Old reputation weakens over time.
+
+Agents must continue performing honestly.
+
+### Progressive Decentralization
+
+Current hackathon version is optimized for speed.
+
+Future roadmap includes:
+
+* DAO governance
+* Reputation-weighted arbitration
+* Randomized guardian selection
+* zk-verifiable execution
+
+See:
+
+* `DECENTRALIZATION_ROADMAP.md`
+* `ECONOMIC_SECURITY.md`
+* `ZKP_PROPOSAL.md`
+
+---
 
 ## Tech Stack
 
-| Layer | Technology |
-|-------|-----------|
-| Blockchain | Mantle Network (Sepolia Testnet, Chain ID 5003) |
-| Smart Contracts | Solidity 0.8.20, Hardhat, ethers.js v6 |
-| AI / NLU | DeepSeek API (deepseek-chat) |
-| Bot Framework | grammY |
-| Frontend | Next.js 14, Tailwind CSS, static export |
-| Identity | ERC-8004 inspired on-chain agent reputation |
+| Layer           | Technology             |
+| --------------- | ---------------------- |
+| Smart Contracts | Solidity 0.8.20        |
+| Framework       | Hardhat                |
+| Language        | TypeScript             |
+| AI Reasoning    | DeepSeek API           |
+| Bot Framework   | grammY                 |
+| Frontend        | Next.js 14             |
+| Styling         | Tailwind CSS           |
+| Network         | Mantle Sepolia         |
+| Testing         | Hardhat + ethers.js v6 |
 
-## Track Submission
+---
 
-- **Hackathon:** Mantle Turing Test Hackathon 2026 (Phase 2: AI Awakening)
-- **Track:** Agentic Economy
-- **Network:** Mantle Sepolia Testnet
+## Repository Structure
 
-### Qualification Checklist
-- [x] 9 smart contracts deployed on Mantle Sepolia Testnet
-- [x] 166 tests passing, zero compilation warnings
-- [x] AI-powered on-chain execution (`executeStrategyWithIntent`)
-- [x] Agent identity with on-chain reputation + endorsements
-- [x] Open source (MIT)
-- [x] 8 on-chain test transactions verified (see DEPLOYED_ADDRESSES.md)
+```text
+clawbot/
+├── bot/                  # Telegram AI Agent
+├── contracts/            # Solidity contracts
+├── frontend/             # Next.js frontend
+├── simulator/            # Economic simulator
+├── demo/                 # Demo assets
+│
+├── README.md
+├── ARCHITECTURE.md
+├── DEPLOYED_ADDRESSES.md
+├── ECONOMIC_SECURITY.md
+├── ECONOMY.md
+├── DECENTRALIZATION_ROADMAP.md
+├── ZKP_PROPOSAL.md
+└── CHANGELOG.md
+```
 
-## Why This Wins
+---
 
-1. **On-chain accountability for AI Agents.** Not another wallet or yield aggregator. ClawBot is infrastructure that answers the question no one else is asking: when an autonomous agent makes a decision, who's responsible? Identity NFTs, challenge mechanisms, and slashing conditions create real economic accountability.
-2. **Pandora's Box challenge mechanism.** Guardians don't just vote — they stake. Challengers and bots escalate deposits round by round until arbitration kicks in. This creates honest incentives at every step: frivolous challenges cost money, bad-faith execution gets slashed.
-3. **Working end-to-end, not a mockup.** 9 contracts deployed on Mantle Sepolia. 166 tests passing, zero compilation warnings. 8 verified on-chain transactions. Telegram bot live. Dashboard rendering real data.
-4. **Natural language UX.** End users don't need to understand contracts, challenge windows, or reputation scores. They type what they want in Telegram, and the system handles the rest — identity gating, intent publishing, execution, and logging.
+## Documentation
 
-## Challenges
+### Core Docs
 
-- **AI intent parsing:** DeepSeek occasionally misclassifies compound intents. Mitigated with structured system prompts and inline keyboard fallbacks.
-- **Mantle RPC rate limiting:** Configured multiple backup RPC providers for reliable pool data queries.
-- **Agent ownership model:** The vault contract creates and owns the agent identity, while a human vault owner authorizes strategy execution — clean separation of concerns.
+* `ARCHITECTURE.md` — System architecture overview
+* `ECONOMIC_SECURITY.md` — Economic attack analysis
+* `ECONOMY.md` — Protocol incentives
+* `DECENTRALIZATION_ROADMAP.md` — Governance roadmap
+* `ZKP_PROPOSAL.md` — Verifiable execution research
+* `CHANGELOG.md` — Judge-feedback iteration history
 
-## Demo
+---
 
-▶ **[Watch Demo Video](demo/demo-video.mp4)** (2 min, 125s — English narration)
+## Deployment
 
-Walkthrough: Split-screen Telegram + Mantle explorer → staking → strategies → challenge mechanism → multi-agent endorsements → 9-contract deployment summary.
+### Mantle Sepolia
 
-*Click to watch in-browser, or right-click to download.*
+| Contract             | Address                                      |
+| -------------------- | -------------------------------------------- |
+| AgentIdentity        | `0xeb0A26aA083B7D4548e266189FE0F84d360dB0A1` |
+| AgentVault           | `0xC0f12519B1cd8F483Ef4B9C637092852Ce64D00f` |
+| ReputationCalculator | `0xD591B100F2eAc43819C5c71f367fA17d1fC90801` |
+| StrategyArbiter      | `0x74DD23a520867a87725bCc3cae800eFb68455EBe` |
+| EconomicModel        | `0x225EBe5ee16749436d85f3DCa120ffCA7946f5a0` |
 
-## Team
+---
 
-Solo builder, powered by Claude Code.
+## Quick Start
 
-## License
+### Clone Repository
 
-MIT
+```bash
+git clone https://github.com/yugen0520/clawbot.git
+cd clawbot
+```
+
+### Install Dependencies
+
+```bash
+npm install
+```
+
+### Configure Environment
+
+Create:
+
+```bash
+.env
+```
+
+Add:
+
+```env
+PRIVATE_KEY=
+RPC_URL=
+DEEPSEEK_API_KEY=
+BOT_TOKEN=
+```
+
+### Run Contracts
+
+```bash
+cd contracts
+npx hardhat compile
+npx hardhat test
+```
+
+### Run Bot
+
+```bash
+cd bot
+npm run dev
+```
+
+---
+
+## Qualification Checklist
+
+✅ Working end-to-end system
+✅ Live deployment on Mantle Sepolia
+✅ Open-source repository
+✅ Smart contract tests passing
+✅ AI-powered autonomous workflow
+✅ Economic accountability mechanism
+✅ Multi-contract protocol architecture
+
+---
+
+## Vision
+
+AI agents are becoming economic actors.
+
+But economic actors require:
+
+> **identity, reputation, and accountability.**
+
+ClawBot provides the missing trust infrastructure for autonomous AI on-chain.
+
+Instead of:
+
+> “Trust the AI”
+
+we move toward:
+
+> **“Trust the incentives.”**
+
