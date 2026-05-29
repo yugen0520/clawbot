@@ -1,72 +1,178 @@
-# ClawBot 协议经济模型
+# ECONOMY.md
 
-## 参与方
+# ClawBot Protocol Incentive Model
 
-| 角色 | 描述 | 核心利益 |
-|------|------|---------|
-| **用户** | 将资产存入 Agent Vault 的普通地址 | 获得 AI 策略驱动的自动化收益 |
-| **Agent** | 有链上身份的 AI 实体，通过 Bot 操作 | 信誉增长 → 更多用户委托 → 撮合费收入 |
-| **开发者/Bot 运营者** | 部署和维护 Agent 的实体 | 通过提交策略结果赚取服务费 |
-| **守护者** | 质押 MNT 参与策略挑战和信誉验证的社区成员 | 质押奖励 + 罚没分成 |
-| **协议** | ClawBot 系统本身 | 国库收入用于生态发展、代币回购 |
+> Economic incentives for accountable AI agents on-chain
 
-## 价值流转
+ClawBot is designed around a simple principle:
 
+> **trust should have economic consequences**
+
+The protocol introduces incentives and penalties so autonomous AI agents are rewarded for reliable behavior and penalized for malicious or low-quality execution.
+
+Rather than relying on trusted operators, ClawBot aims to align incentives across all participants.
+
+---
+
+# Participants
+
+| Participant       | Role                                                  | Incentive                               |
+| ----------------- | ----------------------------------------------------- | --------------------------------------- |
+| **Users**         | Delegate capital or interact with AI agents           | Better automation with accountability   |
+| **AI Agents**     | Autonomous agents with verifiable identity            | Reputation growth and economic rewards  |
+| **Bot Operators** | Maintain infrastructure and execute strategies        | Service fees and reputation             |
+| **Guardians**     | Monitor, challenge, and arbitrate suspicious activity | Staking rewards and slashing incentives |
+| **Protocol**      | Core accountability infrastructure                    | Sustainable ecosystem growth            |
+
+---
+
+# Incentive Design
+
+The protocol introduces **economic accountability** at every critical layer.
+
+## 1. Identity Layer
+
+AI agents receive:
+
+* Verifiable on-chain identity
+* Reputation score
+* Historical execution records
+
+Reliable behavior improves credibility.
+
+Poor performance or malicious behavior reduces reputation.
+
+This creates:
+
+> **Reputation at Stake**
+
+---
+
+## 2. Execution Layer
+
+Before execution:
+
+1. Strategy intent is published
+2. Challenge window begins
+3. Guardians may challenge suspicious actions
+4. Execution only proceeds if no successful challenge exists
+
+This creates:
+
+> **Economic Accountability**
+
+Malicious strategies become economically risky.
+
+---
+
+## 3. Guardian Layer
+
+Guardians stake capital to participate.
+
+They are incentivized to:
+
+* Identify malicious strategies
+* Prevent harmful execution
+* Maintain ecosystem trust
+
+Dishonest or malicious participation may lead to:
+
+> **slashing or loss of rewards**
+
+---
+
+# Fee Structure
+
+Current hackathon implementation includes lightweight protocol fees.
+
+| Fee Type         | Purpose                                | Default      |
+| ---------------- | -------------------------------------- | ------------ |
+| Registration Fee | Prevent identity spam                  | 0.001 MNT    |
+| Service Fee      | Bot execution and protocol maintenance | Configurable |
+| Challenge Stake  | Prevent challenge spam                 | Dynamic      |
+
+These parameters are governance-adjustable.
+
+The objective is:
+
+> **cheap enough for honest participation, expensive enough for abuse**
+
+---
+
+# Value Flow
+
+```text
+User
+   ↓
+AI Agent Request
+   ↓
+Strategy Publication
+   ↓
+Guardian Review
+   ↓
+Execution
+   ↓
+Reputation Update
+   ↓
+Economic Reward / Penalty
 ```
-用户 ──存入资产──▶ AgentVault
-                      │
-                      ▼
-              Bot 生成策略 ──▶ StrategyArbiter（意图公示 + 挑战窗口）
-                      │
-                      ▼
-              AgentVault.executeStrategy()（执行）
-                      │
-                      ▼
-              ReputationCalculator.submitStrategyResult()（结果上链）
-                      │
-          ┌───────────┼───────────┐
-          ▼           ▼           ▼
-      信誉更新    费用收取    守护者监控
+
+The system creates a feedback loop:
+
+```text
+Good behavior
+→ higher reputation
+→ more trust
+→ more usage
+
+Bad behavior
+→ lower reputation
+→ challenges
+→ slashing risk
+→ reduced trust
 ```
 
-### 费用流转
+---
 
-```
-费用来源:
-  ┌─ 注册费（一次性）：Agent 创建链上身份时支付
-  ├─ 查询费（按次）：第三方查询 Agent 信誉数据时支付
-  └─ 撮合费（按比例）：Agent A 推荐 Agent B 的服务时按交易额抽成
+# Why Economics Matter
 
-费用分配（默认比例，治理可调）:
-  ┌─ 50% → 协议国库（合约升级、生态基金、代币回购）
-  ├─ 30% → 守护节点（按质押权重分配）
-  └─ 20% → 高信誉 Agent（按周期排名分配）
-```
+Without economic incentives:
 
-## 费用结构（EconomicModel.sol 参数）
+* malicious bots are cheap to create
+* fake reputation is easy to farm
+* challenge systems become spammed
+* accountability collapses
 
-| 费用类型 | 默认值 | 说明 |
-|---------|--------|------|
-| 注册费 | 0.001 MNT | Agent 创建身份时一次性收取 |
-| 查询费 | 0.0001 MNT | 每次信誉数据查询，防止 API 滥用 |
-| 撮合费 | 10 bps (0.1%) | Agent 间服务推荐时按交易额抽成 |
+ClawBot introduces:
 
-所有参数均可通过治理调整。
+### Verifiable Identity
 
-## 代币功能（预留）
+Who performed the action?
 
-当前版本使用原生 MNT 计价。未来可升级为 ERC-20 治理代币：
+### Reputation at Stake
 
-- **质押**：Bot 和守护者需质押代币才能参与
-- **治理**：持币者投票决定费用参数和分配比例
-- **激励**：高信誉 Agent 获得代币奖励
-- **价值捕获**：协议费用用于回购和销毁
+What history does this agent have?
 
-## 防博弈机制
+### Economic Accountability
 
-1. **质押门槛** — Bot 提交数据需质押 MNT，提交虚假数据面临罚没风险
-2. **挑战窗口** — 策略意图公示后需等待窗口过期，期间守护者可挑战
-3. **守护者共识** — 挑战结果由多名守护者投票决定，单点攻击无效
-4. **信誉时间衰减** — 历史行为权重随时间降低，无法"一次作恶、永久获利"
-5. **查询收费** — 防止恶意批量抓取信誉数据用于女巫分析
-6. **费用分离** — 注册费/查询费/撮合费分开计价，防止单一参数调整影响全局
+What happens if the agent behaves maliciously?
+
+---
+
+# Governance Roadmap
+
+The current version uses native **MNT**.
+
+Future protocol iterations may introduce:
+
+* Stake-weighted governance
+* Adjustable protocol parameters
+* Guardian reputation systems
+* Dynamic fee markets
+* Decentralized arbitration upgrades
+
+This is intentionally left lightweight during hackathon stage.
+
+The current focus is:
+
+> **proving accountable AI infrastructure works before optimizing token economics**
